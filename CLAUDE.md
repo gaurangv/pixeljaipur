@@ -34,6 +34,24 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Building sources:** OSM first, then Overture where OSM is empty, then generated lots where both are empty. Every building has `source` and `front` (street-facing edge indices of its CCW ring).
 - **Workflow:** one phase per branch, small commit per task, plan mode before each phase. After any visual change, run `npm run shots` and look at the PNGs before calling it done.
 
+## Worktrees (Phase 2 runs in parallel)
+
+Phase 2 is split into three streams, each on its own branch in its own git worktree. A coordinating session merges them in the order A, B, C.
+
+| Stream | Branch | Owns (create/edit freely) | Draw-call budget |
+| --- | --- | --- | --- |
+| A. Day cycle | `p2-daycycle` | `src/sky/*`, `src/ui/timeControl.ts`, palette section "Sky (p2-daycycle)" | +30 |
+| B. Traffic & people | `p2-traffic` | `src/actors/*`, lane-graph step in `scripts/build_slice.py`, `data/build/*` (only this stream regenerates data), palette section "Actors (p2-traffic)" | +40 |
+| C. Sound | `p2-sound` | `src/audio/*`, `data/sound_zones.json`, palette section "Audio UI (p2-sound)" | 0 |
+
+Rules for every stream:
+- Run `npm ci` first in a fresh worktree. Use `PORT=517x npm run dev` so dev servers don't clash.
+- **Shared files:** you may add your one import and one entry in your own blocks of `src/core/register.ts`, add colours inside your own palette section, and add new event types to `src/core/events.ts`. Don't touch any other shared file (`src/main.ts`, `src/world/*`, `src/render/*`, `src/ui/*` except your own new files, `CLAUDE.md`, `docs/DECISIONS.md`). If you need a change there, describe it in your hand-back instead.
+- Plug in through `System` (`src/core/systems.ts`): build in `init(ctx)`, change things in `update(dt, now, ctx)`, and return `animating()` = true only while you need continuous frames.
+- Use `ctx.clock` for time, `ctx.events` to talk to other streams, and `ctx.refreshShadows()` after moving the sun. Be deterministic when `ctx.shot` is true: seeded, no network, no audio.
+- Write decisions in `docs/decisions/<branch>.md`. Commit per task. **Never push.**
+- Before handing back: `npx tsc --noEmit`, `npm test`, `npm run shots` (stay within your draw-call budget; total must be at most 150), `npm run build && npm run size`. List the screenshots to review.
+
 ## Layout
 
-`src/render` camera, pixel pass, palette · `src/world` ground, roads, buildings, generators · `src/landmarks` hand-built landmarks · `src/actors` agents · `src/sky` sun/day/weather · `src/audio` · `src/ui` · `scripts/` data + screenshot tools · `data/boundary` slice polygons (WGS84).
+`src/core` clock, events, systems registry · `src/render` camera, pixel pass, palette · `src/world` ground, roads, buildings, generators · `src/landmarks` hand-built landmarks · `src/actors` agents · `src/sky` sun/day/weather · `src/audio` · `src/ui` · `scripts/` data + screenshot tools · `data/boundary` slice polygons (WGS84).

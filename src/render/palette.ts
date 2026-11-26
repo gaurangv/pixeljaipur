@@ -66,6 +66,18 @@ export const palette = {
   shadowWarm: 0x8f6f78, // hemisphere ground colour: warm purple-brown shade instead of grey
   sunWarm: 0xfff0d8,
 
+  // --- Sky (p2-daycycle): add day-cycle colours below this line only ---
+
+  // --- end Sky (p2-daycycle) ---
+
+  // --- Actors (p2-traffic): add traffic/people/bird colours below this line only ---
+
+  // --- end Actors (p2-traffic) ---
+
+  // --- Audio UI (p2-sound): add sound-UI colours below this line only ---
+
+  // --- end Audio UI (p2-sound) ---
+
   // Lines
   outline: 0x3a2622, // 1 px depth-edge outline (warm dark brown, never pure black)
 
