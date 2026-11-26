@@ -35,6 +35,9 @@ export const palette = {
   green: 0x7a8f4a, // gardens
   ground: 0xa89270, // unmapped ground under everything
 
+  // Lines
+  outline: 0x3a2622, // 1 px depth-edge outline (warm dark brown, never pure black)
+
   // Sky
   skyDay: 0xbfd8e6,
   skyDusk: 0xe8a37a,
