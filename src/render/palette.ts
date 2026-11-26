@@ -71,6 +71,36 @@ export const palette = {
   // --- end Sky (p2-daycycle) ---
 
   // --- Actors (p2-traffic): add traffic/people/bird colours below this line only ---
+  eRickshawBlue: 0x3f7fb0, // battery e-rickshaw bodies
+  eRickshawTeal: 0x3a9a86,
+  eRickshawRoof: 0xe4ddc8,
+  rickshawMaroon: 0x7d2e33, // cycle-rickshaw seat
+  rickshawHood: 0x2f3a52,
+  busOrange: 0xd9742c, // city bus
+  busCream: 0xece0c4,
+  busWindow: 0x3b4352,
+  camel: 0xc39a64,
+  camelShade: 0x9c7648,
+  cartWood: 0x8a5a36,
+  sacks: 0xd8c8a0,
+  cowBrown: 0xa77c5c,
+  clothSaffron: 0xe8862a,
+  clothRani: 0xd0417e, // "rani pink"
+  clothIndigo: 0x34407a,
+  clothWhite: 0xeee6d8,
+  clothCream: 0xd9c9a3,
+  clothMaroon: 0x7d2b35,
+  clothGreen: 0x4c8a52,
+  clothTurquoise: 0x3a9e9a,
+  clothMustard: 0xd8a93a,
+  clothRed: 0xc23b30,
+  clothKhaki: 0x9c8a62,
+  clothGrey: 0x7f7c78,
+  skin: 0xb07a58,
+  skinDark: 0x8a5a3e,
+  hair: 0x2a2220,
+  pigeon: 0x8d93a0,
+  pigeonDark: 0x5d6270,
 
   // --- end Actors (p2-traffic) ---
 

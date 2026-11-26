@@ -9,6 +9,7 @@ import type { System } from './systems';
 // --- p2-daycycle imports ---
 
 // --- p2-traffic imports ---
+import { createTraffic } from '../actors/traffic';
 
 // --- p2-sound imports ---
 
@@ -17,6 +18,7 @@ export function registerSystems(): System[] {
     // --- p2-daycycle system ---
 
     // --- p2-traffic system ---
+    createTraffic(),
 
     // --- p2-sound system ---
   ];
