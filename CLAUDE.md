@@ -8,8 +8,9 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 | --- | --- |
 | `npm run dev` | Vite dev server on http://localhost:5173 |
 | `npm test` | Vitest (pure logic in `tests/*.test.ts`) |
-| `npm run shots` | Headless screenshots to `tests/shots/mpp{scale}-rot{0..3}.png` (`-- --mpp 0.5` for one scale) |
+| `npm run shots` | Headless screenshots to `tests/shots/` for every scale and rotation, plus a phone shot. Logs draw calls; fails over 150. Close-up: `-- --mpp 0.5 --rot 2 --q "zoom=6&x=25&y=147"` |
 | `npm run build` | Typecheck + production build to `dist/` |
+| `npm run size` | Gzipped bundle budget check (2 MB), after build |
 | `npm run data` | Full data pipeline (below) |
 | `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.osm.geojson` |
 | `uv run scripts/fetch_overture.py [--refresh]` | Overture buildings to `data/raw/<slice>.overture.geojson` (cached) |
@@ -24,7 +25,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Projection:** 2:1 dimetric (30° elevation, azimuth 45° + 90°·rot), orthographic. Do not change it to true isometric.
 - **Pixels:** render into a low-res target where one texel = `mpp` metres, then nearest-neighbour upscale by an integer `zoom`. Zoom never changes `mpp`.
 - **No shimmer:** the camera target is texel-snapped (`snapToTexel`). The remainder goes to the upscale shader as a sub-pixel offset.
-- **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `shot=1` (later `seed`, `t`). Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
+- **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `seed`, `outline`, `shot=1` (later `t`). The `#z/x/y/rot` hash is the shareable view. Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
 - **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).
 - **Data:** never hand-edit `data/raw/`. Regenerate `data/build/` with the script. Both are committed.
 - **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM and Overture attribution stays visible on the page.

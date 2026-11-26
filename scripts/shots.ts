@@ -21,6 +21,10 @@ const rots = rotsArg ?? [0, 1, 2, 3];
 const outDir = resolve('tests/shots');
 mkdirSync(outDir, { recursive: true });
 
+/** Draw-call budget per frame (scene pass + shadow pass + upscale). */
+const MAX_DRAW_CALLS = 150;
+const failures: string[] = [];
+
 const launchArgs = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 
 async function launch(): Promise<Browser> {
@@ -45,8 +49,26 @@ try {
       await page.waitForFunction(() => window.__pjReady === true, null, { timeout: 30_000 });
       const file = resolve(outDir, `mpp${mpp}-rot${rot}${tag}.png`);
       await page.screenshot({ path: file });
-      console.log('saved', file);
+      const st = await page.evaluate(() => window.__pjStats);
+      console.log('saved', file, st ? `calls=${st.calls} tris=${st.triangles} ms=${st.ms.toFixed(1)}` : '');
+      if (st && st.calls > MAX_DRAW_CALLS) failures.push(`${file}: ${st.calls} draw calls > ${MAX_DRAW_CALLS}`);
     }
+  }
+
+  if (!only && !extra) {
+    // Phone check: default view (Hawa Mahal) on a 390x844 touch screen at 3x DPR.
+    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+    await phone.goto(`${base}?shot=1`);
+    await phone.waitForFunction(() => window.__pjReady === true, null, { timeout: 30_000 });
+    const file = resolve(outDir, 'phone-default.png');
+    await phone.screenshot({ path: file });
+    console.log('saved', file);
+    await phone.close();
+  }
+  if (failures.length) {
+    console.error('BUDGET FAILURES:');
+    for (const f of failures) console.error('  ' + f);
+    process.exitCode = 1;
   }
 } finally {
   await browser.close();
