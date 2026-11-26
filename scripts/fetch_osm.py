@@ -9,10 +9,13 @@
 
 Reads   data/boundary/<slice>.geojson   (WGS84 polygon)
 Writes  data/raw/<slice>.osm.json       (Overpass response, committed; never hand-edit)
-        data/build/<slice>.geojson      (local metres: +x east, +y north, origin Badi Chaupar)
+        data/build/<slice>.osm.geojson  (local metres: +x east, +y north, origin Badi Chaupar)
 
-Every output feature is a Polygon or MultiPolygon with properties.kind in:
+scripts/build_slice.py then merges this with Overture into data/build/<slice>.geojson.
+
+Area features are Polygon/MultiPolygon with properties.kind in:
 building | road | footway | open | green | water. Roads are buffered to polygons.
+Roads also emit a kind=centerline LineString (with properties.class) for later steps.
 Map data (c) OpenStreetMap contributors, ODbL.
 """
 
@@ -167,7 +170,7 @@ def main() -> None:
 
     boundary_path = ROOT / "data/boundary" / f"{args.slice}.geojson"
     raw_path = ROOT / "data/raw" / f"{args.slice}.osm.json"
-    out_path = ROOT / "data/build" / f"{args.slice}.geojson"
+    out_path = ROOT / "data/build" / f"{args.slice}.osm.geojson"
 
     b = json.loads(boundary_path.read_text(encoding="utf-8"))
     poly_wgs = shape(b["features"][0]["geometry"] if b.get("type") == "FeatureCollection" else b["geometry"])
@@ -217,6 +220,12 @@ def main() -> None:
             continue
 
         local = shapely.transform(geom, to_local)
+        if width and kind == "road":
+            line = local.intersection(clip)
+            if not line.is_empty:
+                features.append({"type": "Feature", "geometry": mapping(round_geom(line)), "properties": {
+                    "kind": "centerline", "class": tags["highway"], "width": width,
+                    "id": f"{el['type']}/{el['id']}", **({"name": tags["name"]} if "name" in tags else {})}})
         if width:
             local = local.buffer(width / 2, cap_style="flat", join_style="round", quad_segs=4)
         local = local.intersection(clip)
@@ -224,7 +233,9 @@ def main() -> None:
         if not polys:
             continue
         g = round_geom(polys[0] if len(polys) == 1 else MultiPolygon(polys))
-        props = {"kind": kind, "osm_id": f"{el['type']}/{el['id']}"}
+        props = {"kind": kind, "id": f"{el['type']}/{el['id']}", "source": "osm"}
+        if kind == "road":
+            props["class"] = tags.get("highway")
         if name := tags.get("name:en") or tags.get("name"):
             props["name"] = name
         if (lv := tags.get("building:levels")) and lv.replace(".", "", 1).isdigit():
@@ -233,8 +244,8 @@ def main() -> None:
         counts[kind] = counts.get(kind, 0) + 1
 
     # Stable order (by kind, then id) so diffs of data/build stay readable.
-    order = ["open", "green", "water", "footway", "road", "building"]
-    features.sort(key=lambda f: (order.index(f["properties"]["kind"]), f["properties"]["osm_id"]))
+    order = ["open", "green", "water", "footway", "road", "building", "centerline"]
+    features.sort(key=lambda f: (order.index(f["properties"]["kind"]), f["properties"]["id"]))
     out = {
         "type": "FeatureCollection",
         "properties": {

@@ -10,7 +10,10 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 | `npm test` | Vitest (pure logic in `tests/*.test.ts`) |
 | `npm run shots` | Headless screenshots to `tests/shots/mpp{scale}-rot{0..3}.png` (`-- --mpp 0.5` for one scale) |
 | `npm run build` | Typecheck + production build to `dist/` |
-| `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.geojson` |
+| `npm run data` | Full data pipeline (below) |
+| `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.osm.geojson` |
+| `uv run scripts/fetch_overture.py [--refresh]` | Overture buildings to `data/raw/<slice>.overture.geojson` (cached) |
+| `uv run scripts/build_slice.py` | Merge OSM + Overture + generated frontage, mark street fronts, place landmarks, write `data/build/<slice>.geojson` and `<slice>.landmarks.json` |
 
 (uv installs the script deps on first run; `.venv/` is an optional fallback.)
 
@@ -24,7 +27,8 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `shot=1` (later `seed`, `t`). Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
 - **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).
 - **Data:** never hand-edit `data/raw/`. Regenerate `data/build/` with the script. Both are committed.
-- **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM attribution stays visible on the page.
+- **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM and Overture attribution stays visible on the page.
+- **Building sources:** OSM first, then Overture where OSM is empty, then generated lots where both are empty. Every building has `source` and `front` (street-facing edge indices of its CCW ring).
 - **Workflow:** one phase per branch, small commit per task, plan mode before each phase. After any visual change, run `npm run shots` and look at the PNGs before calling it done.
 
 ## Layout

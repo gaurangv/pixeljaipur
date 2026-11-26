@@ -11,7 +11,16 @@ type Geometry = { type: 'Polygon'; coordinates: Ring[] } | { type: 'MultiPolygon
 export interface FootprintFeature {
   type: 'Feature';
   geometry: Geometry;
-  properties: { kind: FootprintKind; name?: string; levels?: number; osm_id?: string };
+  properties: {
+    kind: FootprintKind;
+    id: string;
+    source?: string;
+    name?: string;
+    levels?: number;
+    /** Exterior-ring edge indices that face a street (ring is CCW). */
+    front?: number[];
+    bazaar?: boolean;
+  };
 }
 
 export interface FootprintCollection {
