@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "shots": "tsx scripts/shots.ts",
-    "data": "uv run scripts/fetch_osm.py && uv run scripts/fetch_overture.py && uv run scripts/build_slice.py",
+    "data": "uv run scripts/fetch_osm.py && uv run scripts/fetch_overture.py && uv run scripts/fetch_places.py && uv run scripts/build_slice.py",
     "size": "tsx scripts/size.ts"
   },
   "dependencies": {

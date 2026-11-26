@@ -25,6 +25,7 @@ import argparse
 import json
 import math
 import random
+import re
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ MAIN_ROADS = {"trunk", "primary", "secondary", "tertiary"}
 FRONT_DIST = 6.0  # an edge counts as a street front if its midpoint is this close to a road
 OVERLAP_MAX = 0.3  # drop an Overture building if this share of it is already covered by OSM/roads
 MIN_AREA = 6.0
+PLACE_FRONTAGE = 14.0  # m; a bazaar's clickable zone = its road plus the shop fronts on both sides
 INSET = 0.05  # m, shrink every footprint so shared walls don't z-fight
 SIMPLIFY = 0.4  # m, tolerance for simplifying Overture footprints
 ISLAND_MAX = 3000.0  # m^2; road-enclosed holes smaller than this are islands
@@ -158,6 +160,70 @@ def hawa_mahal(centerlines, to_local) -> tuple[dict, Polygon]:
         "reserved": mapping(rnd(reserved))["coordinates"],
     }
     return info, reserved
+
+
+
+def build_places(sl: str, feats_out: list, landmark: dict, reserved: Polygon, to_local) -> list[dict]:
+    """Info-card places: curated + discovered, each with a zone polygon, pin anchor and height."""
+    cur_path = ROOT / "data/places.curated.json"
+    raw_path = ROOT / "data/raw" / f"{sl}.places.json"
+    if not cur_path.exists():
+        return []
+    curated = json.loads(cur_path.read_text(encoding="utf-8"))
+    raw = json.loads(raw_path.read_text(encoding="utf-8")) if raw_path.exists() else {"curated": {}, "discovered": []}
+
+    def zone_for(spec: str):
+        kind, _, arg = spec.partition(":")
+        if kind == "landmark" and arg == landmark["id"]:
+            return reserved, Point(*landmark["anchor"])
+        if kind == "osm":
+            for f in feats_out:
+                if f["properties"].get("id") == arg:
+                    g = shape(f["geometry"])
+                    return g, g.representative_point()
+            return None, None
+        if kind == "roads":
+            parts = [shape(f["geometry"]) for f in feats_out
+                     if f["properties"]["kind"] == "road" and f["properties"].get("name") == arg]
+            if not parts:
+                return None, None
+            road = unary_union(parts)
+            anchor = nearest_points(road, road.centroid)[0]
+            return road.buffer(PLACE_FRONTAGE), anchor  # include the shop fronts on both sides
+        if kind == "circle":
+            x, y, r = (float(v) for v in arg.split(","))
+            return Point(x, y).buffer(r, quad_segs=8), Point(x, y)
+        return None, None
+
+    places = []
+    for c in curated["places"]:
+        zone, anchor = zone_for(c["zone"])
+        if zone is None:
+            print(f"  place {c['id']}: zone {c['zone']!r} not found in this slice, skipped")
+            continue
+        res = raw["curated"].get(c["wiki"], {}) if c.get("wiki") else {}
+        places.append({
+            "id": c["id"], "name": c["name"], "nameHi": c.get("nameHi"),
+            "wiki": None if not c.get("wiki") or res.get("missing") else res.get("title", c["wiki"]),
+            "qid": res.get("qid"), "blurb": c["blurb"], "review": bool(c.get("review")),
+            "priority": c.get("priority", 1), "height": c.get("height", 10), "zone": zone, "anchor": anchor,
+        })
+    for d in raw.get("discovered", []):
+        pt = Point(*to_local(np.array([[d["lon"], d["lat"]]]))[0])
+        slug = re.sub(r"[^a-z0-9]+", "-", d["title"].lower()).strip("-")
+        places.append({
+            "id": slug, "name": d["title"], "nameHi": d.get("nameHi"), "wiki": d["title"], "qid": d.get("qid"),
+            "blurb": f"{d['title']} — see Wikipedia.", "review": False, "priority": 2, "height": 10,
+            "zone": pt.buffer(15, quad_segs=8), "anchor": pt,
+        })
+
+    out = []
+    for p in places:
+        polys = to_polys(p["zone"].simplify(0.5))
+        out.append({**{k: v for k, v in p.items() if k not in ("zone", "anchor")},
+                    "anchor": [round(p["anchor"].x, 2), round(p["anchor"].y, 2)],
+                    "zone": [[[round(x, 2), round(y, 2)] for x, y in q.exterior.coords] for q in polys]})
+    return out
 
 
 def main() -> None:
@@ -286,6 +352,9 @@ def main() -> None:
         "features": out_feats,
     }
     (ROOT / "data/build" / f"{sl}.geojson").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    places = build_places(sl, out_feats, landmark, reserved, to_local)
+    (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"Places: {[p['id'] + ('' if p['wiki'] else ' (blurb only)') for p in places]}")
     (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "
           f"{fronted} with street fronts")

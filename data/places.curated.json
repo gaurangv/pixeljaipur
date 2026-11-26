@@ -1,0 +1,73 @@
+{
+  "_comment": "Places that get info cards. 'wiki' = English Wikipedia title (null = no article; the card uses 'blurb'). 'zone' says where the place is in our data: landmark:<id> | osm:<type>/<id> | roads:<OSM road name> | circle:<x>,<y>,<radius m>. 'priority': higher wins when zones overlap. Blurbs marked review:true are hand-written and need a fact check.",
+  "places": [
+    {
+      "id": "hawa-mahal",
+      "name": "Hawa Mahal",
+      "nameHi": "हवा महल",
+      "wiki": "Hawa Mahal",
+      "zone": "landmark:hawaMahal",
+      "height": 21,
+      "priority": 4,
+      "blurb": "The Palace of Winds, built in 1799: a five-storey screen of small latticed windows from which the royal women of the court could watch the street unseen."
+    },
+    {
+      "id": "jama-masjid",
+      "name": "Jama Masjid",
+      "nameHi": "जामा मस्जिद",
+      "wiki": null,
+      "zone": "osm:way/272783000",
+      "height": 14,
+      "priority": 3,
+      "blurb": "The city's congregational mosque, on Johari Bazar a short walk south of Badi Chaupar.",
+      "review": true
+    },
+    {
+      "id": "badi-chaupar",
+      "name": "Badi Chaupar",
+      "nameHi": "बड़ी चौपड़",
+      "wiki": "Badi Chaupar",
+      "zone": "circle:0,0,30",
+      "height": 2,
+      "priority": 2,
+      "blurb": "The great square at the meeting of the walled city's main bazaars, laid out on the 1727 grid plan."
+    },
+    {
+      "id": "johari-bazaar",
+      "name": "Johari Bazaar",
+      "nameHi": "जौहरी बाज़ार",
+      "wiki": null,
+      "zone": "roads:Johari Bazar",
+      "height": 12,
+      "priority": 1,
+      "blurb": "Johari means jeweller: the bazaar running south from Badi Chaupar is the walled city's jewellery and gem market, lined with pink arcaded shops.",
+      "review": true
+    },
+    {
+      "id": "tripolia-bazaar",
+      "name": "Tripolia Bazaar",
+      "nameHi": "त्रिपोलिया बाज़ार",
+      "wiki": null,
+      "zone": "roads:Tripolia Bazaar",
+      "height": 12,
+      "priority": 1,
+      "blurb": "The bazaar running west from Badi Chaupar towards Tripolia Gate, the three-arched gate to the City Palace.",
+      "review": true
+    },
+    {
+      "id": "ramganj-bazaar",
+      "name": "Ramganj Bazaar",
+      "nameHi": "रामगंज बाज़ार",
+      "wiki": null,
+      "zone": "roads:Ramganj Bazaar",
+      "height": 12,
+      "priority": 1,
+      "blurb": "The bazaar running east from Badi Chaupar towards Suraj Pol, the Sun Gate in the eastern city wall.",
+      "review": true
+    }
+  ],
+  "discover": {
+    "_comment": "Wikipedia geosearch inside the slice boundary adds other articles. Titles matching 'exclude' are skipped (not places, or not in the modelled area yet).",
+    "exclude": ["constituency", "district", "bombings", "Dhundhar", "^Jantar Mantar$"]
+  }
+}
