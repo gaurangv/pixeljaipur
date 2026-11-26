@@ -29,6 +29,11 @@ describe('placeTrees on the real slice', () => {
     }
   });
 
+  it('keeps every tree on the diorama base', () => {
+    const boundary = data.properties!.boundary as Pt[];
+    for (const t of trees) expect(pointInRing(t.x, t.y, boundary), `tree at ${t.x},${t.y}`).toBe(true);
+  });
+
   it('keeps canopies from overlapping', () => {
     for (let i = 0; i < trees.length; i++) {
       for (let j = i + 1; j < trees.length; j++) {

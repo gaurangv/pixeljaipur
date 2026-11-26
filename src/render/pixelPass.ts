@@ -49,6 +49,9 @@ export class PixelPass {
         uOutlineColour: { value: new Color(palette.outline) },
         uNearFar: { value: new Vector2(1, 2000) },
         uDepthThreshold: { value: 1.5 },
+        uBgTop: { value: new Color(palette.backdropTop) },
+        uBgBottom: { value: new Color(palette.backdropBottom) },
+        uCanvasH: { value: 1 },
       },
       vertexShader: /* glsl */ `
         void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
@@ -63,6 +66,9 @@ export class PixelPass {
         uniform vec3 uOutlineColour;
         uniform vec2 uNearFar;
         uniform float uDepthThreshold;
+        uniform vec3 uBgTop;
+        uniform vec3 uBgBottom;
+        uniform float uCanvasH;
 
         // Orthographic depth is linear: map [0,1] back to metres from the camera.
         float depthAt(vec2 texel) {
@@ -74,7 +80,11 @@ export class PixelPass {
           vec2 p = gl_FragCoord.xy / uZoom + ${MARGIN.toFixed(1)} + uOffset;
           vec2 texel = floor(p) + 0.5;
           gl_FragColor = texture2D(tScene, texel / uRtSize);
-          if (uOutline > 0.5) {
+          if (gl_FragColor.a < 0.5) {
+            // Empty space around the diorama: soft vertical gradient in 8 stepped bands (pixel-art banding).
+            float t = floor(gl_FragCoord.y / uCanvasH * 8.0) / 7.0;
+            gl_FragColor = vec4(mix(uBgBottom, uBgTop, t), 1.0);
+          } else if (uOutline > 0.5) {
             // Outline the near side of a depth jump, so silhouettes get a 1 px edge.
             float d = depthAt(texel);
             float far = max(max(depthAt(texel + vec2(1.0, 0.0)), depthAt(texel - vec2(1.0, 0.0))),
@@ -106,6 +116,7 @@ export class PixelPass {
 
     this.material.uniforms.uRtSize.value.set(w + 2 * MARGIN, h + 2 * MARGIN);
     this.material.uniforms.uZoom.value = this.zoom;
+    this.material.uniforms.uCanvasH.value = h * this.zoom;
   }
 
   /** Render target texels including the margin; size the camera frustum with these. */

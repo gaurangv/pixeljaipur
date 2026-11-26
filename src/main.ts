@@ -1,11 +1,10 @@
-import { Color, Mesh, PCFShadowMap, PlaneGeometry, Scene, Vector3, WebGLRenderer } from 'three';
+import { PCFShadowMap, Scene, Vector3, WebGLRenderer } from 'three';
 import landmarks from '../data/build/slice1.landmarks.json';
 import placesData from '../data/build/slice1.places.json';
 import sliceUrl from '../data/build/slice1.geojson?url';
 import { buildHawaMahal, type HawaMahalPlacement } from './landmarks/hawaMahal';
 import { cameraBasis, createCamera, normalizeRot, screenToRay, updateCamera, type ScreenView } from './render/camera';
 import { toonDither } from './render/materials';
-import { skyFor } from './render/palette';
 import { PixelPass } from './render/pixelPass';
 import { addLighting } from './sky/light';
 import { InfoCard } from './ui/infoCard';
@@ -13,7 +12,9 @@ import { Pins } from './ui/pins';
 import type { Place } from './ui/places';
 import { applyTheme } from './ui/theme';
 import { hashWriter, parseHash } from './ui/urlState';
+import { bounds, buildBase } from './world/base';
 import { buildDressing } from './world/dressing';
+import type { Pt } from './world/geometry';
 import { buildFootprints, loadSlice } from './world/footprints';
 import { pickPlace } from './world/picking';
 import { buildRoofs } from './world/roofs';
@@ -75,7 +76,7 @@ declare global {
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
-const renderer = new WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: shotMode });
+const renderer = new WebGLRenderer({ canvas, antialias: false, alpha: true, preserveDrawingBuffer: shotMode });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFShadowMap;
 renderer.info.autoReset = false;
@@ -85,13 +86,19 @@ const camera = createCamera();
 pixel.setOutline(outline, Math.max(1.0, 3 * state.mpp));
 
 const scene = new Scene();
-scene.background = new Color(skyFor.noon);
-document.body.style.background = new Color(skyFor.noon).getStyle();
+// No scene background: empty texels stay transparent and the pixel pass paints the backdrop gradient.
+renderer.setClearColor(0x000000, 0);
+const soil = toonDither('soil', ['ground', 'groundDark', 'groundLight'], state.mpp);
 
-const ground = new Mesh(new PlaneGeometry(4000, 4000), toonDither('soil', ['ground', 'groundDark', 'groundLight'], state.mpp));
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+/** Keep the camera over the diorama (set once the slice boundary is known). */
+let panBounds: { x0: number; y0: number; x1: number; y1: number } | null = null;
+function clampTarget(v: Vector3) {
+  if (!panBounds) return;
+  const pad = 20;
+  v.x = Math.min(panBounds.x1 + pad, Math.max(panBounds.x0 - pad, v.x));
+  const north = Math.min(panBounds.y1 + pad, Math.max(panBounds.y0 - pad, -v.z));
+  v.z = -north;
+}
 const sun = addLighting(scene);
 // The scene is static in Phase 1: render the shadow map once, not every frame.
 renderer.shadowMap.autoUpdate = false;
@@ -240,6 +247,7 @@ canvas.addEventListener('pointermove', (e) => {
   const groundUp = new Vector3(up.x, 0, up.z).normalize();
   state.target.addScaledVector(right, -dx).addScaledVector(groundUp, dy * 2);
   state.target.y = 0;
+  clampTarget(state.target);
   invalidate();
 });
 canvas.addEventListener(
@@ -275,6 +283,12 @@ async function start() {
   resize();
   try {
     const slice = await loadSlice(sliceUrl);
+    const boundary = (slice as unknown as { properties?: { boundary?: Pt[] } }).properties?.boundary;
+    if (boundary) {
+      scene.add(buildBase(boundary, soil));
+      panBounds = bounds(boundary);
+      clampTarget(state.target);
+    }
     scene.add(buildFootprints(slice, { skip: ['building'], mpp: state.mpp }));
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);

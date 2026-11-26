@@ -32,6 +32,7 @@ export interface FootprintFeature {
 
 export interface FootprintCollection {
   type: 'FeatureCollection';
+  properties?: { boundary?: [number, number][]; [k: string]: unknown };
   features: FootprintFeature[];
 }
 

@@ -373,6 +373,8 @@ def main() -> None:
             "crs": "local metres from EPSG:32643, origin Badi Chaupar",
             "origin": [ORIGIN_LON, ORIGIN_LAT],
             "attribution": "(c) OpenStreetMap contributors (ODbL); Overture Maps Foundation (ODbL), incl. Google Open Buildings and Microsoft ML Buildings",
+            # The diorama base: slice boundary in local metres, CCW, closed.
+            "boundary": [[round(x, 2), round(y, 2)] for x, y in orient(clip, 1.0).exterior.coords],
         },
         "features": out_feats,
     }

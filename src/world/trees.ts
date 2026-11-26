@@ -83,7 +83,12 @@ export function placeTrees(data: FootprintCollection, worldSeed = 1): TreeSpot[]
   const green = kind('green').flatMap(polygonsOf).map(toArea);
   const open = kind('open').flatMap(polygonsOf).map(toArea);
   const trees: TreeSpot[] = [];
+  // Stay on the diorama base: the whole canopy inside the slice boundary.
+  const boundary = data.properties?.boundary as Pt[] | undefined;
+  const onBase = (x: number, y: number, r: number) =>
+    !boundary || ([[x, y], [x + r, y], [x - r, y], [x, y + r], [x, y - r]] as Pt[]).every(([px, py]) => pointInRing(px, py, boundary));
   const add = (x: number, y: number, r: number) => {
+    if (!onBase(x, y, r)) return;
     if (trees.some((t) => Math.hypot(t.x - x, t.y - y) < t.r + r)) return;
     trees.push({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, r, variant: int(rng, 0, 2) });
   };
