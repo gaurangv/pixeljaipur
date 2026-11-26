@@ -1,5 +1,5 @@
 {
-  "_comment": "Places that get info cards. 'wiki' = English Wikipedia title (null = no article; the card uses 'blurb'). 'zone' says where the place is in our data: landmark:<id> | osm:<type>/<id> | roads:<OSM road name> | circle:<x>,<y>,<radius m>. 'priority': higher wins when zones overlap. Blurbs marked review:true are hand-written and need a fact check.",
+  "_comment": "Places that get info cards. 'wiki' = English Wikipedia title (null = no article; the card uses 'blurb'). 'zone' says where the place is in our data: landmark:<id> | osm:<type>/<id> | roads:<OSM road name> | square:<OSM road name, convex hull> | circle:<x>,<y>,<radius m>. 'priority': higher wins when zones overlap. Blurbs marked review:true are hand-written and need a fact check.",
   "places": [
     {
       "id": "hawa-mahal",
@@ -27,7 +27,7 @@
       "name": "Badi Chaupar",
       "nameHi": "बड़ी चौपड़",
       "wiki": "Badi Chaupar",
-      "zone": "circle:0,0,30",
+      "zone": "square:Badi Chaupar",
       "height": 2,
       "priority": 2,
       "blurb": "The great square at the meeting of the walled city's main bazaars, laid out on the 1727 grid plan."

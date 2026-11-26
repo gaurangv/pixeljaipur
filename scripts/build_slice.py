@@ -190,6 +190,14 @@ def build_places(sl: str, feats_out: list, landmark: dict, reserved: Polygon, to
             road = unary_union(parts)
             anchor = nearest_points(road, road.centroid)[0]
             return road.buffer(PLACE_FRONTAGE), anchor  # include the shop fronts on both sides
+        if kind == "square":
+            # A named square/roundabout: the convex hull of its named road pieces (covers the island too).
+            parts = [shape(f["geometry"]) for f in feats_out
+                     if f["properties"]["kind"] in ("road", "open") and f["properties"].get("name") == arg]
+            if not parts:
+                return None, None
+            filled = unary_union(parts).convex_hull.buffer(2)
+            return filled, filled.centroid
         if kind == "circle":
             x, y, r = (float(v) for v in arg.split(","))
             return Point(x, y).buffer(r, quad_segs=8), Point(x, y)
@@ -223,8 +231,14 @@ def build_places(sl: str, feats_out: list, landmark: dict, reserved: Polygon, to
         p["zone"] = p["zone"].difference(taken)
         taken = taken.union(p["zone"])
 
+    fwd = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
+    inv = Transformer.from_crs("EPSG:32643", "EPSG:4326", always_xy=True)
+    ox, oy = fwd.transform(ORIGIN_LON, ORIGIN_LAT)
+
     out = []
     for p in places:
+        lon, lat = inv.transform(p["anchor"].x + ox, p["anchor"].y + oy)
+        p["lonlat"] = [round(lon, 6), round(lat, 6)]
         polys = to_polys(p["zone"].simplify(0.5))
         out.append({**{k: v for k, v in p.items() if k not in ("zone", "anchor")},
                     "anchor": [round(p["anchor"].x, 2), round(p["anchor"].y, 2)],

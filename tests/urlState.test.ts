@@ -15,6 +15,13 @@ describe('url hash state', () => {
     expect(parseHash('#2/10/20')).toEqual({ zoom: 2, x: 10, y: 20 });
   });
 
+  it('carries an open info card id', () => {
+    const h = formatHash({ zoom: 3, x: 37.1, y: 144.2, rot: 0, place: 'hawa-mahal' });
+    expect(h).toBe('#3/37.1/144.2/0/hawa-mahal');
+    expect(parseHash(h)).toEqual({ zoom: 3, x: 37.1, y: 144.2, rot: 0, place: 'hawa-mahal' });
+    expect(parseHash('#3/1/2/0/<script>')).toBeNull();
+  });
+
   it('rejects junk and out-of-range zoom', () => {
     expect(parseHash('#hello')).toBeNull();
     expect(parseHash('#0/1/2/0')).toBeNull();

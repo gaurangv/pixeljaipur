@@ -63,6 +63,16 @@ try {
     const file = resolve(outDir, 'phone-default.png');
     await phone.screenshot({ path: file });
     console.log('saved', file);
+    // Info card as a bottom sheet (blurb only: no network in shot mode).
+    await phone.goto(`${base}?shot=1&card=hawa-mahal`);
+    await phone.waitForFunction(() => window.__pjReady === true, null, { timeout: 30_000 });
+    await phone.screenshot({ path: resolve(outDir, 'phone-card.png') });
+    console.log('saved', resolve(outDir, 'phone-card.png'));
+    // Desktop card + pins.
+    await page.goto(`${base}?shot=1&card=hawa-mahal`);
+    await page.waitForFunction(() => window.__pjReady === true, null, { timeout: 30_000 });
+    await page.screenshot({ path: resolve(outDir, 'desktop-card.png') });
+    console.log('saved', resolve(outDir, 'desktop-card.png'));
     await phone.close();
   }
   if (failures.length) {

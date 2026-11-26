@@ -14,6 +14,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 | `npm run data` | Full data pipeline (below) |
 | `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.osm.geojson` |
 | `uv run scripts/fetch_overture.py [--refresh]` | Overture buildings to `data/raw/<slice>.overture.geojson` (cached) |
+| `uv run scripts/fetch_places.py [--refresh]` | Resolve Wikipedia titles / Wikidata ids for `data/places.curated.json`, geosearch other articles in the slice (cached in `data/raw/<slice>.places.json`) |
 | `uv run scripts/build_slice.py` | Merge OSM + Overture + generated frontage, mark street fronts, place landmarks, write `data/build/<slice>.geojson` and `<slice>.landmarks.json` |
 
 (uv installs the script deps on first run; `.venv/` is an optional fallback.)
@@ -29,6 +30,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).
 - **Data:** never hand-edit `data/raw/`. Regenerate `data/build/` with the script. Both are committed.
 - **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM and Overture attribution stays visible on the page.
+- **Info cards:** places live in `data/places.curated.json` (zone spec, Hindi name, fallback blurb). `build_slice.py` turns them into `data/build/<slice>.places.json` (zone polygons, anchor, height). Card text is fetched live from Wikipedia only when a card opens, never in `shot=1`. Remote text is set with `textContent` only. `?card=<id>` / `#z/x/y/rot/<id>` open a card.
 - **Building sources:** OSM first, then Overture where OSM is empty, then generated lots where both are empty. Every building has `source` and `front` (street-facing edge indices of its CCW ring).
 - **Workflow:** one phase per branch, small commit per task, plan mode before each phase. After any visual change, run `npm run shots` and look at the PNGs before calling it done.
 

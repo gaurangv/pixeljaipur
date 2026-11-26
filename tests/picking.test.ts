@@ -59,8 +59,9 @@ describe('pickPlace on the real slice', () => {
   });
 
   it('clicking the middle of Badi Chaupar picks it, not a bazaar', () => {
-    const target = new Vector3(0, 0, 0);
-    const s = worldToScreen(new Vector3(0, 0, 0), v(target));
+    const bc = at('badi-chaupar');
+    const target = new Vector3(bc.anchor[0], 0, -bc.anchor[1]);
+    const s = worldToScreen(target, v(target));
     expect(pickPlace(screenToRay(s.x, s.y, v(target)), ps)).toBe('badi-chaupar');
   });
 

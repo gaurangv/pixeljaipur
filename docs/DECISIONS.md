@@ -13,3 +13,5 @@
 | 2026-11-26 | Code licence MIT; v0.1 hosted free on GitHub Pages |
 | 2026-11-26 | Buildings: OSM (117) first, then Overture where OSM is empty (703, mostly Google Open Buildings), then generated frontage lots along main bazaars (186). Overture had 974 in the bbox and no heights. |
 | 2026-11-26 | Hawa Mahal has no footprint in OSM or Overture; it is placed from OSM node 542886858 on the west kerb of Amer Road, facing ESE (~-14°; the Jaipur grid is rotated ~15°). Reserved 50 x 24 m; tune with refs |
+| 2026-11-26 | Info cards: text fetched live from Wikipedia on open (CC BY-SA, credited); Hindi names under titles; hand-written blurbs as fallback and for places without articles (bazaars, Jama Masjid) |
+| 2026-11-26 | Local origin (OSM "Badi Chaupar" locality node) is ~30 m SW of the roundabout centre; place zones use real geometry, not the origin |
