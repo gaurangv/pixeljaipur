@@ -4,7 +4,7 @@ import placesData from '../data/build/slice1.places.json';
 import sliceUrl from '../data/build/slice1.geojson?url';
 import { buildHawaMahal, type HawaMahalPlacement } from './landmarks/hawaMahal';
 import { cameraBasis, createCamera, normalizeRot, screenToRay, updateCamera, type ScreenView } from './render/camera';
-import { toon } from './render/materials';
+import { toonDither } from './render/materials';
 import { skyFor } from './render/palette';
 import { PixelPass } from './render/pixelPass';
 import { addLighting } from './sky/light';
@@ -87,7 +87,7 @@ const scene = new Scene();
 scene.background = new Color(skyFor.noon);
 document.body.style.background = new Color(skyFor.noon).getStyle();
 
-const ground = new Mesh(new PlaneGeometry(4000, 4000), toon('ground'));
+const ground = new Mesh(new PlaneGeometry(4000, 4000), toonDither('soil', ['ground', 'groundDark', 'groundLight'], state.mpp));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
@@ -274,7 +274,7 @@ async function start() {
   resize();
   try {
     const slice = await loadSlice(sliceUrl);
-    scene.add(buildFootprints(slice, { skip: ['building'] }));
+    scene.add(buildFootprints(slice, { skip: ['building'], mpp: state.mpp }));
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);
     scene.add(buildRoofs(houses.specs, seed));

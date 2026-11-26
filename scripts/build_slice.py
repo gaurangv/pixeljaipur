@@ -352,7 +352,12 @@ def main() -> None:
             props["bazaar"] = True
         out_feats.append({"type": "Feature", "geometry": mapping(poly), "properties": props})
 
-    order = ["open", "green", "water", "footway", "road", "building"]
+    # Kerbs: the outline of the merged road network (not each overlapping road piece).
+    kerb = roads.boundary.intersection(clip.buffer(-0.5))
+    if not kerb.is_empty:
+        out_feats.append({"type": "Feature", "geometry": mapping(rnd(kerb.simplify(0.2))), "properties": {"kind": "kerb", "id": "kerbs"}})
+
+    order = ["open", "green", "water", "footway", "road", "building", "kerb"]
     out_feats.sort(key=lambda f: (order.index(f["properties"]["kind"]), f["properties"]["id"]))
     src_count: dict[str, int] = {}
     for f in out_feats:

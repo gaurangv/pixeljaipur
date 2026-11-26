@@ -11,7 +11,7 @@ export const palette = {
   terracottaDeep: 0x8f4c3c,
   terracottaLight: 0xe49d7f, // per-building variation
   terracottaDusty: 0xc98a72,
-  ochre: 0xd8a35e,
+  ochre: 0xcca878,
   sandstone: 0xd9b98c, // paving, kerbs, Hawa Mahal base
   sandstoneShade: 0xb39468,
   limeWhite: 0xf2eadb, // lime-wash borders and motifs on facades
@@ -33,10 +33,15 @@ export const palette = {
   // Ground
   asphalt: 0x6e6660,
   asphaltLine: 0xcfc6b8,
+  asphaltDark: 0x5c5550,
+  asphaltLight: 0x7d746c,
   footpath: 0xc7ab84,
   open: 0xb9a578, // squares, chowks, open land
   green: 0x7a8f4a, // gardens
   ground: 0xa89270, // unmapped ground under everything
+  groundDark: 0x957f5e,
+  groundLight: 0xb8a37f,
+  kerb: 0xcbb58e,
 
   // Trees
   treeDark: 0x4a6533,

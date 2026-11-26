@@ -138,7 +138,7 @@ export function buildDressing(specs: ShopHouseSpec[], data: FootprintCollection,
   // A few cows standing in the road, as they do.
   const roads = data.features
     .filter((f) => f.properties.kind === 'road')
-    .flatMap((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates)) as Pt[][][];
+    .flatMap((f) => (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [])) as Pt[][][];
   let placed = 0;
   for (let tries = 0; tries < 400 && placed < 3; tries++) {
     const x = range(rng, -60, 60);
