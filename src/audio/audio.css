@@ -1,10 +1,10 @@
 /* Sound button + listen mode (p2-sound). Colours: CSS variables from src/render/palette.ts. */
 
 .pj-sound {
-  /* Bottom-left, above where the day-cycle time panel may sit. */
+  /* Bottom-left, stacked above the day-cycle time panel (12px + ~100px tall + gap). */
   position: absolute;
   left: 12px;
-  bottom: 96px;
+  bottom: 122px;
   display: flex;
   gap: 6px;
   pointer-events: auto;
@@ -85,6 +85,10 @@ body.pj-listen .pj-sound:focus-within {
 }
 
 @media (max-width: 600px) {
+  /* Phones: the time panel moves to the top-left, so the buttons can sit lower. */
+  .pj-sound {
+    bottom: 96px;
+  }
   .pj-sound__label {
     display: none;
   }
