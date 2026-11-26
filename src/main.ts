@@ -7,6 +7,8 @@ import { PixelPass } from './render/pixelPass';
 import { buildFootprints, loadSlice } from './world/footprints';
 import { buildShopHouses } from './world/shopHouse';
 import sliceUrl from '../data/build/slice1.geojson?url';
+import landmarks from '../data/build/slice1.landmarks.json';
+import { buildHawaMahal, type HawaMahalPlacement } from './landmarks/hawaMahal';
 
 /**
  * URL params (all optional), so screenshots and shared links are deterministic:
@@ -130,6 +132,8 @@ async function start() {
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);
     console.info('[pixeljaipur] shop-houses', houses.stats);
+    const hm = landmarks.landmarks.find((l) => l.id === 'hawaMahal');
+    if (hm) scene.add(buildHawaMahal(hm as unknown as HawaMahalPlacement));
   } catch (err) {
     console.error('[pixeljaipur] footprints failed to load', err);
   }

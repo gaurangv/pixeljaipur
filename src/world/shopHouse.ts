@@ -1,10 +1,8 @@
 import {
-  BoxGeometry,
   BufferGeometry,
   ConeGeometry,
   ExtrudeGeometry,
   Group,
-  InstancedMesh,
   Matrix4,
   Mesh,
   Path,
@@ -17,6 +15,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { toon } from '../render/materials';
 import type { PaletteKey } from '../render/palette';
 import type { FootprintCollection, FootprintFeature } from './footprints';
+import { at, Batch, unitBox } from './instancing';
 import { chance, int, pick, rngFor, type Rng } from './rng';
 
 /*
@@ -134,31 +133,6 @@ export function describeShopHouse(f: FootprintFeature, worldSeed = 1): ShopHouse
 // Mesh building
 // ---------------------------------------------------------------------------
 
-/** Instanced module: a unit geometry plus a list of transforms. */
-class Batch {
-  readonly matrices: Matrix4[] = [];
-  constructor(
-    readonly name: string,
-    readonly geometry: BufferGeometry,
-    readonly colour: PaletteKey,
-  ) {}
-  add(m: Matrix4) {
-    this.matrices.push(m);
-  }
-  build(): InstancedMesh | null {
-    if (!this.matrices.length) return null;
-    const mesh = new InstancedMesh(this.geometry, toon(this.colour), this.matrices.length);
-    this.matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = this.name;
-    return mesh;
-  }
-}
-
-const unitBox = new BoxGeometry(1, 1, 1);
 const _q = new Quaternion();
 const _up = new Vector3(0, 1, 0);
 
@@ -180,10 +154,6 @@ function onFace(a: Pt, b: Pt, along: number, y: number, width: number, height: n
   const py = a[1] + uy * along + ny * (out / 2 - 0.02);
   _q.setFromAxisAngle(_up, Math.atan2(dy, dx));
   return new Matrix4().compose(new Vector3(px, y + height / 2, -py), _q.clone(), new Vector3(width, height, out));
-}
-
-function at(x: number, y: number, z: number, sx: number, sy: number, sz: number): Matrix4 {
-  return new Matrix4().compose(new Vector3(x, y, z), new Quaternion(), new Vector3(sx, sy, sz));
 }
 
 function wallGeometry(spec: ShopHouseSpec): BufferGeometry | null {
