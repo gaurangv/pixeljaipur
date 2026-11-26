@@ -12,7 +12,7 @@ import { palette, type PaletteKey } from '../render/palette';
 import type { FootprintCollection } from './footprints';
 import { pointInRing } from './geometry';
 import { Batch, unitBox } from './instancing';
-import { chance, pick, range, rngFor, type Rng } from './rng';
+import { chance, int, pick, range, rngFor, type Rng } from './rng';
 import { GROUND_FLOOR_H, type FrontSpec, type ShopHouseSpec } from './shopHouse';
 
 /*
@@ -26,6 +26,7 @@ type Pt = [number, number];
 const AWNINGS: PaletteKey[] = ['awningRed', 'awningBlue', 'awningGreen', 'awningYellow', 'awningCanvas'];
 const SIGNS: PaletteKey[] = ['marigold', 'awningBlue', 'awningGreen', 'limeWhite', 'awningRed'];
 const FRUIT: PaletteKey[] = ['marigold', 'awningGreen', 'awningRed'];
+const SCOOTERS: PaletteKey[] = ['awningRed', 'awningBlue', 'limeWhite', 'tankBlack'];
 
 interface Frame {
   /** unit vector along the edge (data coords) */
@@ -121,6 +122,53 @@ export function buildDressing(specs: ShopHouseSpec[], data: FootprintCollection,
     }
   }
 
+  // Parked street life: autos, scooters, a few handcarts, just inside the kerb.
+  const roads = data.features
+    .filter((f) => f.properties.kind === 'road')
+    .flatMap((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [])) as Pt[][][];
+  const autoBody = new Batch('auto:body', unitBox, 'autoGreen');
+  const autoTop = new Batch('auto:top', unitBox, 'autoYellow');
+  const tyre = new Batch('tyre', unitBox, 'tyre', false);
+  const scooter = Object.fromEntries(SCOOTERS.map((c) => [c, new Batch(`scooter:${c}`, unitBox, c)])) as Record<PaletteKey, Batch>;
+  const seat = new Batch('scooter:seat', unitBox, 'tankBlack', false);
+  for (const { f, fr, s } of fronts) {
+    if (!f.arcade || fr.len < 4) continue;
+    const r = rngFor(`park:${s.id}:${f.edge}`, worldSeed);
+    // the first point straight out from the shop front that is on the road = the kerb
+    const kerbOut = (along: number) => {
+      for (let out = 1.5; out <= 9; out += 0.5) {
+        const x = f.a[0] + fr.u[0] * along + fr.n[0] * out;
+        const y = f.a[1] + fr.u[1] * along + fr.n[1] * out;
+        if (onRoad(x, y, roads)) return out;
+      }
+      return null;
+    };
+    if (chance(r, 0.16)) {
+      const along = range(r, 1.6, fr.len - 1.6);
+      const k = kerbOut(along);
+      if (k !== null) {
+        const out = k + 0.9;
+        autoBody.add(faceBox(f, fr, along, out, 0.35, [2.6, 0.95, 1.3]));
+        autoTop.add(faceBox(f, fr, along, out, 1.55, [2.3, 0.14, 1.4]));
+        autoTop.add(faceBox(f, fr, along - 0.2, out, 1.3, [1.6, 0.25, 1.35]));
+        for (const dx of [-0.9, 0.9]) tyre.add(faceBox(f, fr, along + dx, out, 0, [0.5, 0.45, 1.35]));
+      }
+    }
+    if (chance(r, 0.4)) {
+      const n = int(r, 1, 4);
+      const start = range(r, 1, Math.max(1.1, fr.len - n * 0.9 - 1));
+      const k = kerbOut(start);
+      if (k !== null) {
+        for (let i = 0; i < n; i++) {
+          // scooters park nose-in, perpendicular to the kerb
+          const along = start + i * 0.85;
+          scooter[pick(r, SCOOTERS)].add(faceBox(f, fr, along, k + 0.8, 0.25, [0.45, 0.65, 1.6]));
+          seat.add(faceBox(f, fr, along, k + 0.6, 0.9, [0.4, 0.15, 0.7]));
+        }
+      }
+    }
+  }
+
   // Electric wires across streets: sagging polylines, 1 px in the pixel pass.
   const verts: number[] = [];
   for (const [p, q, h] of crossStreetPairs(fronts, rng)) {
@@ -136,9 +184,6 @@ export function buildDressing(specs: ShopHouseSpec[], data: FootprintCollection,
   }
 
   // A few cows standing in the road, as they do.
-  const roads = data.features
-    .filter((f) => f.properties.kind === 'road')
-    .flatMap((f) => (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [])) as Pt[][][];
   let placed = 0;
   for (let tries = 0; tries < 400 && placed < 3; tries++) {
     const x = range(rng, -60, 60);
@@ -159,7 +204,7 @@ export function buildDressing(specs: ShopHouseSpec[], data: FootprintCollection,
 
   const group = new Group();
   group.name = 'dressing';
-  for (const b of [...Object.values(awning), ...Object.values(sign), ...Object.values(fruit), cart, cow, cowDark]) {
+  for (const b of [...Object.values(awning), ...Object.values(sign), ...Object.values(fruit), cart, cow, cowDark, autoBody, autoTop, tyre, ...Object.values(scooter), seat]) {
     const m = b.build();
     if (m) group.add(m);
   }
