@@ -157,7 +157,7 @@ const _up = new Vector3(0, 1, 0);
  * `along` metres along the edge from `a`, `y` = bottom height, sizes in metres,
  * `out` = how far it protrudes from the wall (its depth).
  */
-function onFace(a: Pt, b: Pt, along: number, y: number, width: number, height: number, out: number): Matrix4 {
+export function onFace(a: Pt, b: Pt, along: number, y: number, width: number, height: number, out: number): Matrix4 {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
   const len = Math.hypot(dx, dy);
@@ -227,7 +227,6 @@ export function buildShopHouses(
     window: new Batch('window', unitBox, 'terracottaDeep'),
     jharokha: new Batch('jharokha', unitBox, 'limeWhite'),
     jharokhaCap: new Batch('jharokhaCap', unitBox, 'sandstoneShade'),
-    parapet: new Batch('parapet', unitBox, 'limeWhite'),
     chhatriPillar: new Batch('chhatriPillar', unitBox, 'limeWhite'),
     chhatriDome: new Batch('chhatriDome', dome, 'limeWhiteShade'),
   };
@@ -273,14 +272,12 @@ export function buildShopHouses(
         });
       });
 
-      // Parapet band on the roof edge.
-      batches.parapet.add(onFace(f.a, f.b, len / 2, s.height, len, 0.6, 0.25));
     }
 
     if (s.chhatri) {
       const [x, y] = s.chhatri;
       const z = -y;
-      const base = s.height;
+      const base = s.height + 0.9; // on top of the parapet line
       const h = 1.8;
       for (const [ox, oz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
         batches.chhatriPillar.add(at(x + ox, base + h / 2, z + oz, 0.25, h, 0.25));

@@ -16,6 +16,7 @@ import { hashWriter, parseHash } from './ui/urlState';
 import { buildDressing } from './world/dressing';
 import { buildFootprints, loadSlice } from './world/footprints';
 import { pickPlace } from './world/picking';
+import { buildRoofs } from './world/roofs';
 import { buildShopHouses } from './world/shopHouse';
 
 /**
@@ -276,6 +277,7 @@ async function start() {
     scene.add(buildFootprints(slice, { skip: ['building'] }));
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);
+    scene.add(buildRoofs(houses.specs, seed));
     scene.add(buildDressing(houses.specs, slice, seed));
     if (hawa) scene.add(buildHawaMahal(hawa));
   } catch (err) {
