@@ -5,6 +5,7 @@ import { skyFor } from './render/palette';
 import { addLighting } from './sky/light';
 import { PixelPass } from './render/pixelPass';
 import { buildFootprints, loadSlice } from './world/footprints';
+import { buildDressing } from './world/dressing';
 import { buildShopHouses } from './world/shopHouse';
 import sliceUrl from '../data/build/slice1.geojson?url';
 import landmarks from '../data/build/slice1.landmarks.json';
@@ -132,6 +133,7 @@ async function start() {
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);
     console.info('[pixeljaipur] shop-houses', houses.stats);
+    scene.add(buildDressing(houses.specs, slice, seed));
     const hm = landmarks.landmarks.find((l) => l.id === 'hawaMahal');
     if (hm) scene.add(buildHawaMahal(hm as unknown as HawaMahalPlacement));
   } catch (err) {
