@@ -1,0 +1,131 @@
+/* Time-of-day panel (src/ui/timeControl.ts). Colours: palette CSS variables only (src/ui/theme.ts). */
+.pj-time {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  width: 232px;
+  box-sizing: border-box;
+  padding: 8px 10px 9px;
+  pointer-events: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  color: var(--pj-outline);
+  background: var(--pj-lime-white);
+  border: 3px solid var(--pj-outline);
+  box-shadow: 4px 4px 0 var(--pj-outline);
+  user-select: none;
+  touch-action: none;
+}
+.pj-time__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.pj-time__clock {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--pj-terracotta-deep);
+}
+.pj-time__ist {
+  font-size: 11px;
+  font-weight: 700;
+}
+.pj-time__day {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--pj-terracotta-shade);
+}
+
+/* Pixel slider: square thumb, flat track with hard edges. */
+.pj-time__slider {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 18px;
+  margin: 2px 0 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.pj-time__slider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(
+    to right,
+    var(--pj-bg-top-night) 0 22%,
+    var(--pj-bg-bottom-dusk) 22% 30%,
+    var(--pj-key-golden) 30% 38%,
+    var(--pj-hemi-sky-noon) 38% 70%,
+    var(--pj-key-golden) 70% 75%,
+    var(--pj-bg-bottom-dusk) 75% 79%,
+    var(--pj-bg-top-night) 79% 100%
+  );
+  border: 2px solid var(--pj-outline);
+}
+.pj-time__slider::-moz-range-track {
+  height: 6px;
+  background: var(--pj-hemi-sky-noon);
+  border: 2px solid var(--pj-outline);
+}
+.pj-time__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 16px;
+  margin-top: -7px;
+  background: var(--pj-marigold);
+  border: 2px solid var(--pj-outline);
+  border-radius: 0;
+}
+.pj-time__slider::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  background: var(--pj-marigold);
+  border: 2px solid var(--pj-outline);
+  border-radius: 0;
+}
+.pj-time__slider:focus-visible {
+  outline: 2px dashed var(--pj-terracotta-deep);
+  outline-offset: 2px;
+}
+
+.pj-time__buttons {
+  display: flex;
+  gap: 5px;
+}
+.pj-time__btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 4px 5px;
+  font: 700 11px/1 inherit;
+  font-family: inherit;
+  color: var(--pj-outline);
+  background: var(--pj-lime-white-shade);
+  border: 2px solid var(--pj-outline);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--pj-outline);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pj-time__btn:hover,
+.pj-time__btn:focus-visible {
+  background: var(--pj-marigold);
+  outline: none;
+}
+.pj-time__btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+.pj-time__btn[aria-pressed='true'] {
+  background: var(--pj-terracotta-deep);
+  color: var(--pj-lime-white);
+}
+
+/* Phones: the info card is a bottom sheet, so the panel moves to the top-left. */
+@media (max-width: 600px) {
+  .pj-time {
+    top: 8px;
+    bottom: auto;
+    left: 8px;
+  }
+}

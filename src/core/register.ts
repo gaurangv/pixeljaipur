@@ -7,6 +7,7 @@ import type { System } from './systems';
  */
 
 // --- p2-daycycle imports ---
+import { createDayCycle } from '../sky/daycycle';
 
 // --- p2-traffic imports ---
 
@@ -15,6 +16,7 @@ import type { System } from './systems';
 export function registerSystems(): System[] {
   return [
     // --- p2-daycycle system ---
+    createDayCycle(),
 
     // --- p2-traffic system ---
 
