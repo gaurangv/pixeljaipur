@@ -291,7 +291,7 @@ def main() -> None:
     # --- then Overture where OSM has nothing -----------------------------------
     added = skipped = 0
     blocked = unary_union([osm_union, roads, reserved, islands])
-    for f in ov["features"]:
+    for n, f in enumerate(ov["features"]):
         pr = f["properties"]
         src = ((pr.get("sources") or [{}])[0] or {}).get("dataset", "")
         if src == "OpenStreetMap":
@@ -309,7 +309,9 @@ def main() -> None:
             p = max(p, key=lambda q: q.area) if p else None
             if p is None or p.area < MIN_AREA:
                 continue
-            props = {"id": f"overture/{pr.get('id', '?')}" + (f"#{i}" if i else ""), "source": f"overture:{tag}"}
+            # Overture keeps its GERS id on the feature, not in properties.
+            oid = f.get("id") or pr.get("id") or f"idx{n}"
+            props = {"id": f"overture/{oid}" + (f"#{i}" if i else ""), "source": f"overture:{tag}"}
             if pr.get("num_floors"):
                 props["levels"] = float(pr["num_floors"])
             buildings.append((p, props))

@@ -11,6 +11,13 @@ const polys = (k: string) =>
     .flatMap((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [])) as Pt[][][];
 const inside = (x: number, y: number, rings: Pt[][]) => pointInRing(x, y, rings[0]) && !rings.slice(1).some((h) => pointInRing(x, y, h));
 
+describe('slice data', () => {
+  it('gives every building a unique id (ids seed all procedural choices)', () => {
+    const ids = data.features.filter((f) => f.properties.kind === 'building').map((f) => f.properties.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
 describe('placeTrees on the real slice', () => {
   const trees = placeTrees(data, 1);
 
