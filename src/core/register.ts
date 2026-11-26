@@ -10,6 +10,7 @@ import type { System } from './systems';
 import { createDayCycle } from '../sky/daycycle';
 
 // --- p2-traffic imports ---
+import { createTraffic } from '../actors/traffic';
 
 // --- p2-sound imports ---
 
@@ -19,6 +20,7 @@ export function registerSystems(): System[] {
     createDayCycle(),
 
     // --- p2-traffic system ---
+    createTraffic(),
 
     // --- p2-sound system ---
   ];

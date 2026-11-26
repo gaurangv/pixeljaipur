@@ -11,6 +11,7 @@ Reads   data/build/<slice>.osm.geojson        (from fetch_osm.py, local metres)
         data/boundary/<slice>.geojson
 Writes  data/build/<slice>.geojson            (what the app loads)
         data/build/<slice>.landmarks.json
+        data/build/<slice>.lanes.json         (lane graph + pedestrian walks, for src/actors)
 
 Building properties written:
   id, source (osm | overture:google | overture:microsoft | overture:esri | generated),
@@ -246,6 +247,406 @@ def build_places(sl: str, feats_out: list, landmark: dict, reserved: Polygon, to
     return out
 
 
+# --- lane graph (p2-traffic) --------------------------------------------------------------
+# A directed lane graph for LEFT-hand traffic, from the OSM centrelines. Written to
+# data/build/<slice>.lanes.json and loaded by src/actors/lanes.ts. Lanes are offset to the
+# left of the centreline (two-way roads) or split into a left and right lane (wide one-ways),
+# trimmed back at junctions and joined there by short Bezier connectors.
+LANE_SNAP = 1.5  # m; a dangling road end this close to another road is joined to it
+LANE_MIN_EDGE = 1.5  # m; edges shorter than this collapse into a single node
+LANE_MIN_NETWORK = 40.0  # m; drop disconnected road fragments shorter than this in total
+LANE_BOUNDARY = 2.0  # m; a road end this close to the slice edge is a source / sink
+RING_NAME = "Badi Chaupar"
+WALK_OFF = 0.9  # m; pedestrians walk this far out from a shop front
+WALK_HAWA = 2.6  # m; ... and this far out from the Hawa Mahal facade line (in front of the plinth step)
+FOOT_CLASSES = {"pedestrian", "footway", "path", "steps"}
+LANE_CLASS = {**{c: 0 for c in MAIN_ROADS}, "unclassified": 1, "residential": 1, "living_street": 2, "service": 2}
+
+
+def _offset_left(cs: list[tuple[float, float]], d: float) -> list[tuple[float, float]]:
+    """Offset a polyline by d to its LEFT (mitred, miter clamped to 2d)."""
+    if abs(d) < 1e-9:
+        return list(cs)
+    out = []
+    for i in range(len(cs)):
+        ns = []
+        for a, b in ((i - 1, i), (i, i + 1)):
+            if 0 <= a and b < len(cs):
+                dx, dy = cs[b][0] - cs[a][0], cs[b][1] - cs[a][1]
+                n = math.hypot(dx, dy) or 1.0
+                ns.append((-dy / n, dx / n))
+        nx, ny = sum(n[0] for n in ns) / len(ns), sum(n[1] for n in ns) / len(ns)
+        k = math.hypot(nx, ny) or 1.0
+        nx, ny = nx / k, ny / k
+        cos_half = max(0.5, nx * ns[0][0] + ny * ns[0][1])
+        out.append((cs[i][0] + nx * d / cos_half, cs[i][1] + ny * d / cos_half))
+    return out
+
+
+def _substring(cs: list[tuple[float, float]], a: float, b: float) -> list[tuple[float, float]]:
+    line = LineString(cs)
+    from shapely.ops import substring
+
+    sub = substring(line, a, b)
+    return list(sub.coords) if isinstance(sub, LineString) else [tuple(sub.coords[0])] * 2
+
+
+def _bezier(p0, d0, p2, d2, uturn=False) -> list[tuple[float, float]]:
+    dist = math.hypot(p2[0] - p0[0], p2[1] - p0[1])
+    k = (1.3 if uturn else 0.4) * max(dist, 0.5)
+    c1 = (p0[0] + d0[0] * k, p0[1] + d0[1] * k)
+    c2 = (p2[0] - d2[0] * k, p2[1] - d2[1] * k)
+    n = max(2, min(10, math.ceil((dist * (2 if uturn else 1)) / 1.5)))
+    pts = []
+    for i in range(n + 1):
+        t = i / n
+        u = 1 - t
+        pts.append((u**3 * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t**3 * p2[0],
+                    u**3 * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t**3 * p2[1]))
+    return pts
+
+
+def _unit(ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    n = math.hypot(dx, dy) or 1.0
+    return dx / n, dy / n
+
+
+def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, landmark) -> dict:
+    tags = {f"way/{el['id']}": el.get("tags", {}) for el in raw_osm.get("elements", []) if el["type"] == "way"}
+
+    def oneway_of(wid: str) -> int:
+        t = tags.get(wid, {})
+        ow = t.get("oneway")
+        if ow is None and t.get("junction") in ("roundabout", "circular"):
+            ow = "yes"
+        return 1 if ow in ("yes", "1", "true") else -1 if ow == "-1" else 0
+
+    # 1. road parts as vertex lists (2 dp, the same rounding as the OSM step, so shared nodes match)
+    parts: list[dict] = []
+    for f in sorted(centerlines, key=lambda f: f["properties"]["id"]):
+        g = shape(f["geometry"])
+        lines = [g] if isinstance(g, LineString) else [x for x in getattr(g, "geoms", []) if isinstance(x, LineString)]
+        p = f["properties"]
+        for ln in lines:
+            cs: list[tuple[float, float]] = []
+            for x, y in ln.coords:
+                q = (round(x, 2), round(y, 2))
+                if not cs or q != cs[-1]:
+                    cs.append(q)
+            if len(cs) >= 2:
+                parts.append({"cs": cs, "id": p["id"], "cls": p["class"], "w": float(p["width"]),
+                              "name": p.get("name"), "ow": oneway_of(p["id"])})
+
+    # 2. snap dangling ends onto nearby roads (insert a vertex there)
+    def counts():
+        c: dict = {}
+        for pt in parts:
+            for q in set(pt["cs"]):
+                c[q] = c.get(q, 0) + 1
+        return c
+
+    cnt = counts()
+    for pi, pt in enumerate(parts):
+        for end in (0, -1):
+            q = pt["cs"][end]
+            if cnt[q] > 1 or clip.exterior.distance(Point(q)) < LANE_BOUNDARY:
+                continue
+            best = None
+            for oi, other in enumerate(parts):
+                if oi == pi:
+                    continue
+                ol = LineString(other["cs"])
+                d = ol.distance(Point(q))
+                if d < LANE_SNAP and (best is None or d < best[0]):
+                    best = (d, oi, ol.project(Point(q)))
+            if best is None:
+                continue
+            _, oi, s = best
+            ocs = parts[oi]["cs"]
+            near = min(ocs, key=lambda v: math.hypot(v[0] - q[0], v[1] - q[1]))
+            if math.hypot(near[0] - q[0], near[1] - q[1]) < LANE_SNAP:
+                target = near
+            else:
+                ip = LineString(ocs).interpolate(s)
+                target = (round(ip.x, 2), round(ip.y, 2))
+                acc = 0.0
+                for k in range(len(ocs) - 1):
+                    seg = math.hypot(ocs[k + 1][0] - ocs[k][0], ocs[k + 1][1] - ocs[k][1])
+                    if acc + seg >= s:
+                        ocs.insert(k + 1, target)
+                        break
+                    acc += seg
+            pt["cs"][end] = target
+            cnt = counts()
+
+    # 3. split at nodes (shared vertices and ends) into undirected edges
+    node_of: dict = {}
+    nodes: list[list[float]] = []
+
+    def node(q):
+        if q not in node_of:
+            node_of[q] = len(nodes)
+            nodes.append([q[0], q[1]])
+        return node_of[q]
+
+    edges: list[dict] = []
+    for pt in parts:
+        cs = pt["cs"]
+        cur = [cs[0]]
+        for q in cs[1:]:
+            cur.append(q)
+            if cnt[q] > 1 or q == cs[-1]:
+                if len(cur) >= 2:
+                    edges.append({**{k: v for k, v in pt.items() if k != "cs"}, "cs": cur, "a": node(cur[0]), "b": node(cur[-1])})
+                cur = [q]
+
+    # 4. collapse very short edges (merge their end nodes)
+    parent = list(range(len(nodes)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for e in edges:
+        if LineString(e["cs"]).length < LANE_MIN_EDGE:
+            parent[find(e["b"])] = find(e["a"])
+    kept = []
+    for e in edges:
+        a, b = find(e["a"]), find(e["b"])
+        if a == b:
+            continue
+        cs = list(e["cs"])
+        cs[0], cs[-1] = tuple(nodes[a]), tuple(nodes[b])
+        kept.append({**e, "a": a, "b": b, "cs": cs})
+    edges = kept
+
+    # 5. never drive through a building: drop edges whose lanes would cross one (mapped roads
+    #    sometimes run under OSM / Overture footprints), then drop small disconnected fragments
+    solid = buildings.buffer(-0.1)
+    blocked_edges = 0
+    kept = []
+    for e in edges:
+        offs = [0.22 * e["w"], -0.22 * e["w"]] if e["ow"] else [e["w"] / 4, -e["w"] / 4]
+        # a vehicle body (about 0.6 m either side of its lane) must not enter a footprint
+        if any(LineString(_offset_left(e["cs"], o)).buffer(0.6).intersection(solid).area > 0.3 for o in offs):
+            blocked_edges += 1
+            continue
+        kept.append(e)
+    edges = kept
+    comp = list(range(len(nodes)))
+
+    def cfind(i):
+        while comp[i] != i:
+            comp[i] = comp[comp[i]]
+            i = comp[i]
+        return i
+
+    for e in edges:
+        comp[cfind(e["a"])] = cfind(e["b"])
+    total: dict = {}
+    for e in edges:
+        total[cfind(e["a"])] = total.get(cfind(e["a"]), 0.0) + LineString(e["cs"]).length
+    dropped = [e for e in edges if total[cfind(e["a"])] < LANE_MIN_NETWORK]
+    edges = [e for e in edges if total[cfind(e["a"])] >= LANE_MIN_NETWORK]
+
+    # 6. the roundabout: one-way edges on the Badi Chaupar circle
+    ring_pts = [q for e in edges if e["name"] == RING_NAME for q in e["cs"]]
+    rc = (sum(q[0] for q in ring_pts) / len(ring_pts), sum(q[1] for q in ring_pts) / len(ring_pts)) if ring_pts else (0.0, 0.0)
+    rr = sum(math.hypot(q[0] - rc[0], q[1] - rc[1]) for q in ring_pts) / max(1, len(ring_pts))
+    for e in edges:
+        e["ring"] = bool(ring_pts) and e["ow"] != 0 and all(abs(math.hypot(q[0] - rc[0], q[1] - rc[1]) - rr) < 8 for q in e["cs"])
+
+    degree: dict = {}
+    for ei, e in enumerate(edges):
+        degree.setdefault(e["a"], []).append(ei)
+        degree.setdefault(e["b"], []).append(ei)
+    boundary = {n for n in degree if clip.exterior.distance(Point(nodes[n])) < LANE_BOUNDARY}
+
+    def away(ei, n):
+        """Unit direction of edge ei leaving node n."""
+        cs = edges[ei]["cs"]
+        if edges[ei]["a"] == n:
+            return _unit(*cs[0], *cs[1])
+        return _unit(*cs[-1], *cs[-2])
+
+    def trim(ei, n):
+        e = edges[ei]
+        length = LineString(e["cs"]).length
+        inc = degree[n]
+        if len(inc) == 1:
+            return 0.0 if n in boundary else min(e["w"] / 4 + 1.0, 0.4 * length)
+        u = away(ei, n)
+        t = 1.0
+        for fi in inc:
+            if fi == ei:
+                continue
+            v = away(fi, n)
+            dot = u[0] * v[0] + u[1] * v[1]
+            sin = abs(u[0] * v[1] - u[1] * v[0])
+            t = max(t, edges[fi]["w"] / 2 * (1.0 if dot >= 0 else sin) + 0.75)
+        return min(t, 0.42 * length)
+
+    # 7. lanes on the directed edges
+    inside = clip.buffer(-1.5).intersection(roads.buffer(0.2))
+    lanes: list[dict] = []
+    by_dir: dict = {}  # (edge, forward) -> [lane ids], index 0 = left lane
+    for ei, e in enumerate(edges):
+        dirs = [True] if e["ow"] == 1 else [False] if e["ow"] == -1 else [True, False]
+        for fwd in dirs:
+            cs = e["cs"] if fwd else e["cs"][::-1]
+            a, b = (e["a"], e["b"]) if fwd else (e["b"], e["a"])
+            w = e["w"]
+            offs = ([0.22 * w, -0.22 * w] if w >= 10 else [0.0]) if e["ow"] else [w / 4]
+            ids = []
+            for off in offs:
+                oc = _offset_left(cs, off)
+                length = LineString(oc).length
+                t0, t1 = trim(ei, a), trim(ei, b)
+                if length - t0 - t1 < 0.5:
+                    t0 = t1 = max(0.0, (length - 0.5) / 2)
+                pts = _substring(oc, t0, length - t1)
+                if a in boundary or b in boundary:
+                    # end the lane inside the diorama (offset lanes at an oblique slice edge poke out)
+                    inner = to_polys_lines(LineString(pts).intersection(inside))
+                    if inner:
+                        pts = list(max(inner, key=lambda g: g.length).coords)
+                ids.append(len(lanes))
+                lanes.append({"pts": pts, "a": a, "b": b, "edge": ei, "fwd": fwd, "cls": LANE_CLASS.get(e["cls"], 2),
+                              "w": w, "ring": e["ring"], "conn": False, "next": []})
+            by_dir[(ei, fwd)] = ids
+
+    # 8. connectors at every node
+    n_road = len(lanes)
+    for n, inc in degree.items():
+        if n in boundary:
+            continue  # sources and sinks
+        ins = [(ei, fwd) for ei in inc for fwd in (True, False) if (ei, fwd) in by_dir and (edges[ei]["b"] if fwd else edges[ei]["a"]) == n]
+        outs = [(ei, fwd) for ei in inc for fwd in (True, False) if (ei, fwd) in by_dir and (edges[ei]["a"] if fwd else edges[ei]["b"]) == n]
+        dead_end = len(inc) == 1
+        for ein in ins:
+            for eout in outs:
+                uturn = ein[0] == eout[0]
+                if uturn and not dead_end:
+                    continue
+                Ls, Ms = by_dir[ein], by_dir[eout]
+                for i, li in enumerate(Ls):
+                    for j, mi in enumerate(Ms):
+                        if not (len(Ls) == 1 or len(Ms) == 1 or i == j):
+                            continue
+                        L, M = lanes[li], lanes[mi]
+                        p0, p2 = L["pts"][-1], M["pts"][0]
+                        d0 = _unit(*L["pts"][-2], *p0)
+                        d2 = _unit(*p2, *M["pts"][1])
+                        turn = math.degrees(math.atan2(d0[0] * d2[1] - d0[1] * d2[0], d0[0] * d2[0] + d0[1] * d2[1]))
+                        if abs(turn) > 150 and not uturn:
+                            continue
+                        cid = len(lanes)
+                        lanes.append({"pts": _bezier(p0, d0, p2, d2, uturn), "a": n, "b": n, "edge": -1, "cls": M["cls"],
+                                      "w": min(L["w"], M["w"]), "ring": L["ring"] and M["ring"], "conn": True,
+                                      "yield": (not L["ring"]) and M["ring"], "next": [mi]})
+                        L["next"].append(cid)
+
+    # 9. pedestrian walks: in front of street-facing building edges, along footways, and the Hawa Mahal front
+    bgrid = buildings.buffer(0.45)  # walkers sway up to 0.3 m off the line
+    walks: list[list[tuple[float, float]]] = []
+    busy: list[int] = []  # 1 = a bazaar shop front (or the Hawa Mahal): busier with shoppers
+
+    def keep_walk(cs, bazaar=False):
+        line = LineString(cs)
+        for piece in to_polys_lines(line.difference(bgrid).intersection(clip.buffer(-1.0))):
+            if piece.length >= 2.0:
+                walks.append(list(piece.coords))
+                busy.append(1 if bazaar else 0)
+
+    th = math.radians(landmark["facingDeg"])
+    fx, fy = math.cos(th), math.sin(th)
+    ax, ay = landmark["anchor"][0] + fx * WALK_HAWA, landmark["anchor"][1] + fy * WALK_HAWA
+    half = landmark["width"] / 2 - 1.0
+    keep_walk([(ax + fy * half, ay - fx * half), (ax - fy * half, ay + fx * half)], True)
+    return {"edges": edges, "lanes": lanes, "nodes": nodes, "boundary": boundary, "ring": (rc, rr), "walks": walks, "busy": busy,
+            "dropped": dropped, "blocked": blocked_edges, "n_road": n_road, "keep_walk": keep_walk}
+
+
+def to_polys_lines(geom) -> list[LineString]:
+    if geom.is_empty:
+        return []
+    if isinstance(geom, LineString):
+        return [geom]
+    if hasattr(geom, "geoms"):
+        return [p for g in geom.geoms for p in to_polys_lines(g)]
+    return []
+
+
+def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, clip, roads) -> None:
+    """Add walks from building fronts / footways, check lanes against roads and buildings, write JSON."""
+    keep_walk = lg["keep_walk"]
+    for f in out_feats:
+        pr = f["properties"]
+        if pr["kind"] != "building" or not pr.get("front"):
+            continue
+        ring = f["geometry"]["coordinates"][0]
+        for i in pr["front"]:
+            (x1, y1), (x2, y2) = ring[i], ring[i + 1]
+            length = math.hypot(x2 - x1, y2 - y1)
+            if length < 2.5:
+                continue
+            ux, uy = (x2 - x1) / length, (y2 - y1) / length
+            nx, ny = uy, -ux  # outward for CCW
+            a = (x1 + ux * 0.3 + nx * WALK_OFF, y1 + uy * 0.3 + ny * WALK_OFF)
+            b = (x2 - ux * 0.3 + nx * WALK_OFF, y2 - uy * 0.3 + ny * WALK_OFF)
+            keep_walk([a, b], bool(pr.get("bazaar")))
+    for el in sorted(raw_osm.get("elements", []), key=lambda e: e["id"]):
+        if el["type"] != "way" or el.get("tags", {}).get("highway") not in FOOT_CLASSES:
+            continue
+        coords = [(p["lon"], p["lat"]) for p in el.get("geometry", []) if p]
+        if len(coords) < 2 or el["tags"].get("area") == "yes":
+            continue
+        keep_walk([tuple(c) for c in to_local(np.array(coords))])
+
+    # sanity: how much of every lane lies on the road surface / inside a building
+    bld = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"]).buffer(-0.2)
+    road_area = roads.buffer(0.3)
+    off_road = in_bld = total = 0
+    for L in lg["lanes"]:
+        line = LineString(L["pts"])
+        for k in range(int(line.length) + 1):
+            p = line.interpolate(k)
+            total += 1
+            off_road += not road_area.contains(p)
+            in_bld += bld.contains(p)
+
+    nodes, lanes = lg["nodes"], lg["lanes"]
+    used = sorted({n for L in lanes for n in (L["a"], L["b"])})
+    remap = {n: i for i, n in enumerate(used)}
+    r1 = lambda v: round(v, 1)
+    out = {
+        "slice": sl,
+        "note": "Lane graph for left-hand traffic (build_slice.py). Lane: p=flat [x,y,...] polyline (local metres), "
+                "n=next lane ids, a/b=from/to node, c=class (0 main, 1 residential, 2 service/lane), w=road width, "
+                "j=junction connector, r=on the Badi Chaupar ring, y=give way (enters the ring). Node: [x, y, 1 if slice edge]. "
+                "walks: pedestrian polylines; busy: 1 for walks along bazaar shop fronts.",
+        "ring": {"c": [r1(lg["ring"][0][0]), r1(lg["ring"][0][1])], "r": r1(lg["ring"][1])},
+        "nodes": [[r1(nodes[n][0]), r1(nodes[n][1]), 1 if n in lg["boundary"] else 0] for n in used],
+        "lanes": [
+            {"p": [r1(v) for q in L["pts"] for v in q], "n": L["next"], "a": remap[L["a"]], "b": remap[L["b"]],
+             "c": L["cls"], "w": L["w"],
+             **({"j": 1} if L["conn"] else {}), **({"r": 1} if L["ring"] else {}), **({"y": 1} if L.get("yield") else {})}
+            for L in lanes
+        ],
+        "walks": [[r1(v) for q in w for v in q] for w in lg["walks"]],
+        "busy": lg["busy"],
+    }
+    path = ROOT / "data/build" / f"{sl}.lanes.json"
+    path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    print(f"Lanes: {lg['n_road']} road lanes + {len(lanes) - lg['n_road']} connectors on {len(lg['edges'])} edges "
+          f"(dropped {len(lg["dropped"])} fragment edges, {lg["blocked"]} through buildings); {len(out['walks'])} walks; "
+          f"{off_road}/{total} lane samples off the road surface, {in_bld} inside buildings; "
+          f"ring centre {out['ring']['c']} r={out['ring']['r']}; {path.stat().st_size // 1024} KB")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--slice", default="slice1")
@@ -385,6 +786,11 @@ def main() -> None:
     (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"Places: {[p['id'] + ('' if p['wiki'] else ' (blurb only)') for p in places]}")
     (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+    # Lane graph + pedestrian walks for the traffic system (p2-traffic).
+    raw_osm = json.loads((ROOT / "data/raw" / f"{sl}.osm.json").read_text(encoding="utf-8"))
+    bld_union = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"] + [reserved])
+    lg = build_lanes(centerlines, raw_osm, clip, roads, bld_union, to_local, landmark)
+    finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads)
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "
           f"{fronted} with street fronts")
     print(f"Hawa Mahal anchor {landmark['anchor']} facing {landmark['facingDeg']} deg on '{landmark['street']}'")
