@@ -36,7 +36,7 @@ import type { FootprintCollection } from './world/footprints';
  *   seed    world seed for procedural generation                default 1
  *   outline 0 = disable the 1 px depth outline
  *   card    open this place's info card (e.g. hawa-mahal); also #z/x/y/rot/<place>
- *   t       freeze world time, IST, e.g. 2026-01-14T18:45     default: today 07:00 (screenshots: 2026-01-14T07:00)
+ *   t       freeze world time, IST, e.g. 2026-01-14T18:45     default: today 08:00 (screenshots: 2026-01-14T07:50)
  *   shot    1 = render once, then set window.__pjReady          (for scripts/shots.ts)
  */
 const params = new URLSearchParams(location.search);
@@ -78,7 +78,7 @@ const initialPlace = params.get('card') ?? fromHash.place ?? null;
 // --- World time + Phase 2 systems (src/core). Time starts frozen at morning golden hour;
 // the day-cycle system's UI can switch it to running/live. `?t=` and shot mode stay frozen.
 const tParam = params.get('t');
-const clock = new Clock((tParam && parseIST(tParam)) || (shotMode ? parseIST(SHOT_DEFAULT)! : todayAtIST(7)), 'fixed');
+const clock = new Clock((tParam && parseIST(tParam)) || (shotMode ? parseIST(SHOT_DEFAULT)! : todayAtIST(8)), 'fixed');
 const events = new EventBus();
 const systems = new Systems(registerSystems());
 let ctx: WorldContext | null = null;
@@ -356,6 +356,7 @@ async function start() {
       renderer.shadowMap.needsUpdate = true;
       dirty = true;
     },
+    setBackdrop: (top, bottom) => pixel.setBackdrop(top, bottom),
     overlay,
     params,
     seed,

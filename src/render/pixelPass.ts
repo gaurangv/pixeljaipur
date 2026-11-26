@@ -124,6 +124,12 @@ export class PixelPass {
     return new Vector2(this.size.x + 2 * MARGIN, this.size.y + 2 * MARGIN);
   }
 
+  /** Colours of the stepped backdrop gradient painted where nothing was drawn (palette hex values). */
+  setBackdrop(top: number, bottom: number): void {
+    this.material.uniforms.uBgTop.value.setHex(top);
+    this.material.uniforms.uBgBottom.value.setHex(bottom);
+  }
+
   /** Turn the 1 px outline on/off. `threshold` is the depth jump in metres that counts as an edge. */
   setOutline(enabled: boolean, threshold: number): void {
     this.material.uniforms.uOutline.value = enabled ? 1 : 0;

@@ -54,7 +54,7 @@ export function todayAtIST(hour = 7, nowMs = Date.now()): Date {
 }
 
 /** Deterministic default for screenshots: a clear winter morning (also Makar Sankranti). */
-export const SHOT_DEFAULT = '2026-01-14T07:00';
+export const SHOT_DEFAULT = '2026-01-14T07:50'; // sun ~7 deg up: golden hour (07:00 is still pre-dawn in January)
 
 export class Clock {
   private ms: number;

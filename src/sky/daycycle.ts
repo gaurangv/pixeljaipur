@@ -1,4 +1,4 @@
-import { Color, type HemisphereLight, type IUniform, type Mesh, type Object3D, type Scene, type WebGLRenderer } from 'three';
+import type { HemisphereLight } from 'three';
 import { worldTime, type WorldTime } from '../core/clock';
 import type { System, WorldContext } from '../core/systems';
 import { palette } from '../render/palette';
@@ -27,35 +27,11 @@ import {
 /** Seconds a single light takes to fade on or off. */
 const FADE_SEC = 0.45;
 
-type BgUniforms = { uBgTop: IUniform<Color>; uBgBottom: IUniform<Color> };
-
-/**
- * The backdrop gradient lives in PixelPass's private upscale material. Find it once by
- * watching the renderer draw a scene other than the city (the upscale quad), then stop watching.
- */
-function watchBackdrop(renderer: WebGLRenderer, city: Scene, found: (u: BgUniforms) => void): void {
-  const original = renderer.render;
-  let tries = 0;
-  renderer.render = function (this: WebGLRenderer, scene: Object3D, camera) {
-    if (scene !== city) {
-      let u: BgUniforms | null = null;
-      scene.traverse((o) => {
-        const m = (o as Mesh).material as { uniforms?: Partial<BgUniforms> } | undefined;
-        if (!u && m && !Array.isArray(m) && m.uniforms?.uBgTop && m.uniforms.uBgBottom) u = m.uniforms as BgUniforms;
-      });
-      if (u || ++tries > 10) renderer.render = original;
-      if (u) found(u);
-    }
-    return original.call(this, scene, camera);
-  } as WebGLRenderer['render'];
-}
-
 export function createDayCycle(): System {
   const stepper = new SunStepper();
   let sky: HemisphereLight | null = null;
   let lights: CityLights | null = null;
   let levels = new Float32Array(0);
-  let bg: BgUniforms | null = null;
   let bgTop: number = palette.backdropTop;
   let bgBottom: number = palette.backdropBottom;
   let keySource: KeySource = 'sun';
@@ -63,12 +39,6 @@ export function createDayCycle(): System {
   let lastFraction = -1;
   let ui: TimeControl | null = null;
   let running = false;
-
-  const applyBackdrop = () => {
-    if (!bg) return;
-    bg.uBgTop.value.setHex(bgTop);
-    bg.uBgBottom.value.setHex(bgBottom);
-  };
 
   return {
     id: 'daycycle',
@@ -78,10 +48,6 @@ export function createDayCycle(): System {
       lights = buildCityLights(ctx.specs, ctx.slice, ctx.seed);
       levels = new Float32Array(lights.count);
       ctx.scene.add(lights.group);
-      watchBackdrop(ctx.renderer, ctx.scene, (u) => {
-        bg = u;
-        applyBackdrop();
-      });
       if (!ctx.shot) ui = new TimeControl(ctx.overlay, ctx.clock, () => ctx.invalidate());
     },
 
@@ -115,7 +81,7 @@ export function createDayCycle(): System {
       }
       bgTop = blendHex(w, (p) => p.bgTop);
       bgBottom = blendHex(w, (p) => p.bgBottom);
-      applyBackdrop();
+      ctx.setBackdrop(bgTop, bgBottom);
 
       // 3. City lights, staggered by per-light thresholds; fade unless frozen.
       if (lights) {

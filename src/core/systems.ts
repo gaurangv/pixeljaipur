@@ -28,6 +28,8 @@ export interface WorldContext {
   invalidate(): void;
   /** Re-render the (static) shadow map on the next frame, e.g. after the sun steps. */
   refreshShadows(): void;
+  /** Recolour the backdrop gradient around the diorama (palette hex values). */
+  setBackdrop(top: number, bottom: number): void;
   /** HTML layer over the canvas for UI (pointer-events: none on the layer itself). */
   overlay: HTMLElement;
   params: URLSearchParams;
