@@ -1,0 +1,103 @@
+/* Sound button + listen mode (p2-sound). Colours: CSS variables from src/render/palette.ts. */
+
+.pj-sound {
+  /* Bottom-left, above where the day-cycle time panel may sit. */
+  position: absolute;
+  left: 12px;
+  bottom: 96px;
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  transition: opacity 0.3s;
+}
+
+.pj-sound__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  justify-content: center;
+  font: 700 12px/1 inherit;
+  color: var(--pj-outline);
+  background: var(--pj-audio-idle);
+  border: 2px solid var(--pj-outline);
+  box-shadow: 2px 2px 0 var(--pj-outline);
+  cursor: pointer;
+}
+.pj-sound__btn svg {
+  display: block;
+  fill: var(--pj-outline);
+}
+.pj-sound__btn:hover {
+  background: var(--pj-marigold);
+}
+.pj-sound__btn:focus-visible {
+  outline: 2px solid var(--pj-marigold);
+  outline-offset: 2px;
+}
+.pj-sound__btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--pj-outline);
+}
+.pj-sound__btn[aria-pressed='true'] {
+  background: var(--pj-audio-on);
+}
+.pj-sound__label {
+  padding-right: 2px;
+}
+
+/* Speaker: waves when on, a cross when off. */
+.pj-sound__toggle .pj-sound__waves {
+  display: none;
+}
+.pj-sound__toggle.is-on .pj-sound__waves {
+  display: inline;
+  animation: pj-sound-pulse 1.6s steps(2, jump-none) infinite;
+}
+.pj-sound__toggle.is-on .pj-sound__cross {
+  display: none;
+}
+@keyframes pj-sound-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.45;
+  }
+}
+
+/* ---- Listen mode: hide the interface, keep only these buttons (dimmed) ---- */
+body.pj-listen #pj-overlay > :not(.pj-sound),
+body.pj-listen .pj-card,
+body.pj-listen #credits {
+  visibility: hidden !important;
+}
+body.pj-listen .pj-sound {
+  opacity: 0.35;
+}
+body.pj-listen .pj-sound:hover,
+body.pj-listen .pj-sound:focus-within {
+  opacity: 1;
+}
+
+@media (max-width: 600px) {
+  .pj-sound__label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pj-sound {
+    transition: none;
+  }
+  .pj-sound__toggle.is-on .pj-sound__waves {
+    animation: none;
+  }
+  .pj-sound__btn:active {
+    transform: none;
+  }
+}

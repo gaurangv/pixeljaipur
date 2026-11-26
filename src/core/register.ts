@@ -13,6 +13,7 @@ import { createDayCycle } from '../sky/daycycle';
 import { createTraffic } from '../actors/traffic';
 
 // --- p2-sound imports ---
+import { soundSystem } from '../audio';
 
 export function registerSystems(): System[] {
   return [
@@ -23,5 +24,6 @@ export function registerSystems(): System[] {
     createTraffic(),
 
     // --- p2-sound system ---
+    soundSystem(),
   ];
 }

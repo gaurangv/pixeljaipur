@@ -138,6 +138,8 @@ export const palette = {
   // --- end Actors (p2-traffic) ---
 
   // --- Audio UI (p2-sound): add sound-UI colours below this line only ---
+  audioIdle: 0xe6dcc4, // sound / listen button face when off (awning canvas)
+  audioOn: 0x8fc49a, // button face while sound plays: a soft "live" green
 
   // --- end Audio UI (p2-sound) ---
 

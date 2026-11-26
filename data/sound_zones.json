@@ -1,0 +1,137 @@
+{
+  "note": "Hand-placed ambient sound zones for slice1. Local metres from Badi Chaupar: x east, y north. 'points' is one point or a polyline; 'radius' is where the zone is at half level; 'level' 0..1; 'curve' is [hourIST, 0..1] keys, linear, wrapping at midnight.",
+  "zones": [
+    {
+      "id": "crowd-badi-chaupar",
+      "voice": "crowd",
+      "points": [[15, 43]],
+      "radius": 45,
+      "level": 0.55,
+      "curve": "bazaar"
+    },
+    {
+      "id": "crowd-johari-bazaar",
+      "voice": "crowd",
+      "points": [[-19, 20], [-45, -90], [-66, -176], [-90, -300]],
+      "radius": 30,
+      "level": 0.6,
+      "curve": "bazaar"
+    },
+    {
+      "id": "crowd-tripolia-bazaar",
+      "voice": "crowd",
+      "points": [[-20, 48], [-145, 100], [-205, 92]],
+      "radius": 30,
+      "level": 0.5,
+      "curve": "bazaar"
+    },
+    {
+      "id": "crowd-ramganj-bazaar",
+      "voice": "crowd",
+      "points": [[48, 52], [190, 18], [225, 8]],
+      "radius": 30,
+      "level": 0.5,
+      "curve": "bazaar"
+    },
+    {
+      "id": "traffic-badi-chaupar",
+      "voice": "traffic",
+      "points": [[15, 43]],
+      "radius": 55,
+      "level": 0.45,
+      "curve": "traffic"
+    },
+    {
+      "id": "traffic-amer-road",
+      "voice": "traffic",
+      "points": [[15, 66], [26, 91], [46, 170], [75, 283], [83, 346]],
+      "radius": 35,
+      "level": 0.4,
+      "curve": "traffic"
+    },
+    {
+      "id": "traffic-johari-tripolia-ramganj",
+      "voice": "traffic",
+      "points": [[-90, -300], [-45, -90], [-19, 20], [15, 43], [-145, 100], [-205, 92], [-145, 100], [15, 43], [190, 18], [225, 8]],
+      "radius": 30,
+      "level": 0.28,
+      "curve": "traffic"
+    },
+    {
+      "id": "pigeons-hawa-mahal",
+      "voice": "pigeons",
+      "points": [[19, 123], [31, 171]],
+      "radius": 25,
+      "level": 0.5,
+      "curve": "pigeons"
+    },
+    {
+      "id": "bells-bazaar-temple",
+      "voice": "bells",
+      "points": [[-28, -40]],
+      "radius": 25,
+      "level": 0.4,
+      "curve": "bells",
+      "placeholder": true,
+      "note": "PLACEHOLDER: a small shrine just off Johari Bazaar's east side. Not a mapped temple; move it when we place a real one."
+    },
+    {
+      "id": "chai-badi-chaupar",
+      "voice": "chai",
+      "points": [[42, 72]],
+      "radius": 20,
+      "level": 0.4,
+      "curve": "chai"
+    },
+    {
+      "id": "chai-johari-bazaar",
+      "voice": "chai",
+      "points": [[-38, -62]],
+      "radius": 20,
+      "level": 0.35,
+      "curve": "chai"
+    },
+    {
+      "id": "birds-hawa-mahal-trees",
+      "voice": "birds",
+      "points": [[-25, 160]],
+      "radius": 90,
+      "level": 0.35,
+      "curve": "birds"
+    },
+    {
+      "id": "birds-south",
+      "voice": "birds",
+      "points": [[60, -150]],
+      "radius": 90,
+      "level": 0.3,
+      "curve": "birds"
+    },
+    {
+      "id": "crickets-everywhere",
+      "voice": "crickets",
+      "points": [[0, 40]],
+      "radius": 260,
+      "level": 0.22,
+      "curve": "crickets"
+    },
+    {
+      "id": "dog-distant",
+      "voice": "dog",
+      "points": [[-180, 300]],
+      "radius": 220,
+      "level": 0.18,
+      "curve": "dog"
+    }
+  ],
+  "curves": {
+    "bazaar": [[0, 0.04], [5, 0.02], [7, 0.12], [10, 0.45], [13, 0.6], [16, 0.7], [19, 1], [21, 0.7], [23, 0.15]],
+    "traffic": [[0, 0.1], [5, 0.08], [8, 0.55], [10, 0.8], [13, 0.7], [18, 1], [20.5, 0.75], [23, 0.3]],
+    "pigeons": [[0, 0], [5.5, 0.05], [6.5, 0.8], [9, 1], [17, 0.9], [19, 0.4], [20, 0]],
+    "bells": [[0, 0], [4.5, 0], [5.5, 0.6], [7, 0.9], [9, 0.3], [12, 0.1], [17.5, 0.3], [19, 0.9], [20.5, 0.2], [22, 0]],
+    "chai": [[0, 0], [5.5, 0], [6.5, 0.7], [8, 1], [11, 0.4], [16, 0.7], [18, 0.9], [21, 0.3], [22.5, 0]],
+    "birds": [[0, 0], [4.5, 0], [5.5, 0.6], [6.5, 1], [8.5, 0.6], [10.5, 0.15], [16.5, 0.15], [18, 0.5], [19.2, 0]],
+    "crickets": [[0, 0.9], [4.5, 0.7], [5.8, 0], [18.3, 0], [19.8, 0.8], [22, 1]],
+    "dog": [[0, 1], [4.5, 0.7], [5.5, 0], [20.5, 0], [22.5, 0.8]]
+  }
+}
