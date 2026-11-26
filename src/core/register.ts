@@ -11,6 +11,7 @@ import type { System } from './systems';
 // --- p2-traffic imports ---
 
 // --- p2-sound imports ---
+import { soundSystem } from '../audio';
 
 export function registerSystems(): System[] {
   return [
@@ -19,5 +20,6 @@ export function registerSystems(): System[] {
     // --- p2-traffic system ---
 
     // --- p2-sound system ---
+    soundSystem(),
   ];
 }
