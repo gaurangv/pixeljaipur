@@ -39,9 +39,11 @@ const num = (key: string) => {
   return params.has(key) && Number.isFinite(v) ? v : undefined;
 };
 
-/** Zoom = device pixels per texel; default to ~3 CSS px per texel on any screen. */
+/** Zoom = device pixels per texel. */
 const MAX_ZOOM = 16;
-const defaultZoom = Math.min(MAX_ZOOM, Math.max(1, Math.round(3 * (window.devicePixelRatio || 1))));
+// ~3 CSS px per texel on desktop; phones get a wider view (1.5 CSS px per texel) so more city fits.
+const cssPerTexel = window.innerWidth < 700 ? 1.5 : 3;
+const defaultZoom = Math.min(MAX_ZOOM, Math.max(1, Math.round(cssPerTexel * (window.devicePixelRatio || 1))));
 
 const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
 const defaultView = (() => {
@@ -131,6 +133,7 @@ function screenView(): ScreenView {
 let ease: { from: Vector3; to: Vector3; t0: number; ms: number } | null = null;
 function flyTo(x: number, y: number, ms = 400) {
   const to = new Vector3(x, 0, -y);
+  clampTarget(to);
   if (shotMode || ms <= 0) {
     state.target.copy(to);
     invalidate();
@@ -273,7 +276,10 @@ window.addEventListener('hashchange', () => {
   if (!v) return;
   if (v.zoom !== undefined) state.zoom = v.zoom;
   if (v.rot !== undefined) state.rot = normalizeRot(v.rot);
-  if (v.x !== undefined && v.y !== undefined) state.target.set(v.x, 0, -v.y);
+  if (v.x !== undefined && v.y !== undefined) {
+    state.target.set(v.x, 0, -v.y);
+    clampTarget(state.target);
+  }
   if (v.place && v.place !== card.openId) openPlace(v.place, null, false);
   resize();
   dirty = true;

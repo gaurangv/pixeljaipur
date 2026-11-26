@@ -62,6 +62,10 @@ export const palette = {
   backdropTop: 0xe9dcc6,
   backdropBottom: 0xcdb89a,
 
+  // Light
+  shadowWarm: 0x8f6f78, // hemisphere ground colour: warm purple-brown shade instead of grey
+  sunWarm: 0xfff0d8,
+
   // Lines
   outline: 0x3a2622, // 1 px depth-edge outline (warm dark brown, never pure black)
 

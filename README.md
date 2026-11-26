@@ -4,7 +4,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled **Pink City**, m
 
 **Live: https://gaurangv.github.io/pixeljaipur/**
 
-![Hawa Mahal and Amer Road at morning golden hour](docs/img/hawa-mahal.png)
+![The Hawa Mahal slice as a diorama: Badi Chaupar and its bazaars at morning golden hour](docs/img/diorama.png)
 
 Real 3D geometry is rendered through a 2:1 dimetric orthographic camera into a low-resolution target and scaled up with nearest-neighbour filtering. You get a pixel-art look while lighting, shadows and the day cycle stay real.
 

@@ -17,10 +17,10 @@ export function sunDirection(azimuthDeg = SUN.azimuthDeg, altitudeDeg = SUN.alti
 
 /** Adds sun + sky fill to `root`. `extent` is the half-size (m) of the area that casts shadows. */
 export function addLighting(root: Object3D, extent = 360): DirectionalLight {
-  const sky = new HemisphereLight(palette.skyDay, palette.ground, 2.0);
+  const sky = new HemisphereLight(palette.skyDay, palette.shadowWarm, 2.1);
   root.add(sky);
 
-  const sun = new DirectionalLight(palette.limeWhite, 2.2);
+  const sun = new DirectionalLight(palette.sunWarm, 2.3);
   sun.position.copy(sunDirection()).multiplyScalar(600);
   sun.target.position.set(0, 0, 0);
   sun.castShadow = true;
