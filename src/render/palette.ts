@@ -67,7 +67,40 @@ export const palette = {
   sunWarm: 0xfff0d8,
 
   // --- Sky (p2-daycycle): add day-cycle colours below this line only ---
-
+  // Key light (sun by day, sky glow at twilight, moon at night)
+  keyNoon: 0xfff6e6,
+  keyGolden: 0xffc79a, // low sun: the pink glows on terracotta
+  keyDusk: 0xf08aa8, // after sunset: rose glow from the western sky
+  keyNight: 0x8aa2f0, // moonlight
+  // Hemisphere sky / ground fill per preset
+  hemiSkyNoon: 0xcfe2ee,
+  hemiSkyGolden: 0xf0c0aa,
+  hemiSkyDusk: 0x7c80dc,
+  hemiSkyNight: 0x3048a0,
+  hemiGroundNoon: 0x8f6f78,
+  hemiGroundGolden: 0x9a6470,
+  hemiGroundDusk: 0x6a3f70,
+  hemiGroundNight: 0x1c1f40,
+  // Backdrop gradient (top / bottom) per preset
+  bgTopNoon: 0xe2eef2,
+  bgBottomNoon: 0xcdbfa4,
+  bgTopGolden: 0xf2d6be,
+  bgBottomGolden: 0xdca592,
+  bgTopDusk: 0x5e66b0,
+  bgBottomDusk: 0xd08aa0,
+  bgTopNight: 0x10163a,
+  bgBottomNight: 0x2a2c5e,
+  // City lights (unlit, per-instance colour)
+  glowWindow: 0xffc767,
+  glowWindowWarm: 0xff9f4a,
+  glowWindowCool: 0xfff0c8, // the odd tube light
+  glowShop: 0xf08a3a, // lit shop interior inside an arch
+  glowBulb: 0xfff4c0,
+  glowLamp: 0xfff0b8,
+  lampOff: 0x8f8a80, // unlit lamp glass
+  lampPost: 0x3b3434,
+  poolLamp: 0x6a4416, // additive ground pool under a street lamp
+  poolShop: 0x4a280c, // additive spill in front of a lit shop
   // --- end Sky (p2-daycycle) ---
 
   // --- Actors (p2-traffic): add traffic/people/bird colours below this line only ---
