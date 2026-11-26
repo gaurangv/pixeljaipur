@@ -2,6 +2,10 @@ import { PCFShadowMap, Scene, Vector3, WebGLRenderer } from 'three';
 import landmarks from '../data/build/slice1.landmarks.json';
 import placesData from '../data/build/slice1.places.json';
 import sliceUrl from '../data/build/slice1.geojson?url';
+import { Clock, parseIST, SHOT_DEFAULT, todayAtIST } from './core/clock';
+import { EventBus } from './core/events';
+import { registerSystems } from './core/register';
+import { Systems, type WorldContext } from './core/systems';
 import { buildHawaMahal, type HawaMahalPlacement } from './landmarks/hawaMahal';
 import { cameraBasis, createCamera, normalizeRot, screenToRay, updateCamera, type ScreenView } from './render/camera';
 import { toonDither } from './render/materials';
@@ -19,7 +23,8 @@ import { buildFootprints, loadSlice } from './world/footprints';
 import { pickPlace } from './world/picking';
 import { buildRoofs } from './world/roofs';
 import { buildTrees, placeTrees } from './world/trees';
-import { buildShopHouses } from './world/shopHouse';
+import { buildShopHouses, type ShopHouseSpec } from './world/shopHouse';
+import type { FootprintCollection } from './world/footprints';
 
 /**
  * View state comes from (highest first): query params, the #z/x/y/rot hash, then the default
@@ -31,6 +36,7 @@ import { buildShopHouses } from './world/shopHouse';
  *   seed    world seed for procedural generation                default 1
  *   outline 0 = disable the 1 px depth outline
  *   card    open this place's info card (e.g. hawa-mahal); also #z/x/y/rot/<place>
+ *   t       freeze world time, IST, e.g. 2026-01-14T18:45     default: today 07:00 (screenshots: 2026-01-14T07:00)
  *   shot    1 = render once, then set window.__pjReady          (for scripts/shots.ts)
  */
 const params = new URLSearchParams(location.search);
@@ -68,6 +74,14 @@ const seed = Math.round(num('seed') ?? 1);
 const places = placesData.places as unknown as Place[];
 const placeById = new Map(places.map((p) => [p.id, p]));
 const initialPlace = params.get('card') ?? fromHash.place ?? null;
+
+// --- World time + Phase 2 systems (src/core). Time starts frozen at morning golden hour;
+// the day-cycle system's UI can switch it to running/live. `?t=` and shot mode stay frozen.
+const tParam = params.get('t');
+const clock = new Clock((tParam && parseIST(tParam)) || (shotMode ? parseIST(SHOT_DEFAULT)! : todayAtIST(7)), 'fixed');
+const events = new EventBus();
+const systems = new Systems(registerSystems());
+let ctx: WorldContext | null = null;
 
 declare global {
   interface Window {
@@ -171,7 +185,15 @@ function frame() {
 }
 
 let dirty = true;
-function loop() {
+let lastT = 0;
+function loop(t = 0) {
+  const dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0;
+  lastT = t;
+  if (ctx) {
+    clock.tick(dt);
+    systems.update(dt, clock.now(), ctx);
+    if (clock.running || systems.animating()) dirty = true;
+  }
   if (ease) {
     const k = Math.min(1, (performance.now() - ease.t0) / ease.ms);
     const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2; // easeInOutQuad
@@ -223,6 +245,12 @@ const endPointer = (e: PointerEvent) => {
     const id = pickPlace(screenToRay(e.clientX - rect.left, e.clientY - rect.top, screenView()), places);
     if (id) openPlace(id, null, false);
     else card.close();
+    // Let systems react to clicks on the city (e.g. pigeons take off).
+    const ray = screenToRay(e.clientX - rect.left, e.clientY - rect.top, screenView());
+    if (ray.dir.y < 0) {
+      const k = -ray.origin.y / ray.dir.y;
+      events.emit('groundClick', { x: ray.origin.x + ray.dir.x * k, y: -(ray.origin.z + ray.dir.z * k) });
+    }
   }
   tap = null;
   pointers.delete(e.pointerId);
@@ -287,8 +315,10 @@ window.addEventListener('hashchange', () => {
 
 async function start() {
   resize();
+  let slice: FootprintCollection = { type: 'FeatureCollection', features: [] };
+  let specs: ShopHouseSpec[] = [];
   try {
-    const slice = await loadSlice(sliceUrl);
+    slice = await loadSlice(sliceUrl);
     const boundary = (slice as unknown as { properties?: { boundary?: Pt[] } }).properties?.boundary;
     if (boundary) {
       scene.add(buildBase(boundary, soil));
@@ -297,6 +327,7 @@ async function start() {
     }
     scene.add(buildFootprints(slice, { skip: ['building'], mpp: state.mpp }));
     const houses = buildShopHouses(slice, seed);
+    specs = houses.specs;
     scene.add(houses.group);
     scene.add(buildRoofs(houses.specs, seed));
     scene.add(buildTrees(placeTrees(slice, seed), seed));
@@ -309,6 +340,29 @@ async function start() {
     // A shared link: open the card; only centre on the place if the link didn't set a view.
     openPlace(initialPlace, null, !fromHash.zoom && !params.has('x'));
   }
+  ctx = {
+    scene,
+    renderer,
+    sun,
+    slice,
+    specs,
+    places,
+    clock,
+    events,
+    screenView,
+    invalidate: () => (dirty = true),
+    refreshShadows: () => {
+      sun.shadow.needsUpdate = true;
+      renderer.shadowMap.needsUpdate = true;
+      dirty = true;
+    },
+    overlay,
+    params,
+    seed,
+    shot: shotMode,
+  };
+  await systems.init(ctx);
+  systems.update(0, clock.now(), ctx);
   sun.shadow.needsUpdate = true;
   renderer.shadowMap.needsUpdate = true;
   if (shotMode) {
