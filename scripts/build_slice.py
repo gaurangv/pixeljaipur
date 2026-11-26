@@ -425,12 +425,13 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
 
     # 5. never drive through a building: drop edges whose lanes would cross one (mapped roads
     #    sometimes run under OSM / Overture footprints), then drop small disconnected fragments
-    solid = buildings.buffer(-0.3)
+    solid = buildings.buffer(-0.1)
     blocked_edges = 0
     kept = []
     for e in edges:
         offs = [0.22 * e["w"], -0.22 * e["w"]] if e["ow"] else [e["w"] / 4, -e["w"] / 4]
-        if any(LineString(_offset_left(e["cs"], o)).intersects(solid) for o in offs):
+        # a vehicle body (about 0.6 m either side of its lane) must not enter a footprint
+        if any(LineString(_offset_left(e["cs"], o)).buffer(0.6).intersection(solid).area > 0.3 for o in offs):
             blocked_edges += 1
             continue
         kept.append(e)
@@ -549,21 +550,23 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
                         L["next"].append(cid)
 
     # 9. pedestrian walks: in front of street-facing building edges, along footways, and the Hawa Mahal front
-    bgrid = buildings.buffer(0.2)
+    bgrid = buildings.buffer(0.45)  # walkers sway up to 0.3 m off the line
     walks: list[list[tuple[float, float]]] = []
+    busy: list[int] = []  # 1 = a bazaar shop front (or the Hawa Mahal): busier with shoppers
 
-    def keep_walk(cs):
+    def keep_walk(cs, bazaar=False):
         line = LineString(cs)
         for piece in to_polys_lines(line.difference(bgrid).intersection(clip.buffer(-1.0))):
             if piece.length >= 2.0:
                 walks.append(list(piece.coords))
+                busy.append(1 if bazaar else 0)
 
     th = math.radians(landmark["facingDeg"])
     fx, fy = math.cos(th), math.sin(th)
     ax, ay = landmark["anchor"][0] + fx * WALK_HAWA, landmark["anchor"][1] + fy * WALK_HAWA
     half = landmark["width"] / 2 - 1.0
-    keep_walk([(ax + fy * half, ay - fx * half), (ax - fy * half, ay + fx * half)])
-    return {"edges": edges, "lanes": lanes, "nodes": nodes, "boundary": boundary, "ring": (rc, rr), "walks": walks,
+    keep_walk([(ax + fy * half, ay - fx * half), (ax - fy * half, ay + fx * half)], True)
+    return {"edges": edges, "lanes": lanes, "nodes": nodes, "boundary": boundary, "ring": (rc, rr), "walks": walks, "busy": busy,
             "dropped": dropped, "blocked": blocked_edges, "n_road": n_road, "keep_walk": keep_walk}
 
 
@@ -594,7 +597,7 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
             nx, ny = uy, -ux  # outward for CCW
             a = (x1 + ux * 0.3 + nx * WALK_OFF, y1 + uy * 0.3 + ny * WALK_OFF)
             b = (x2 - ux * 0.3 + nx * WALK_OFF, y2 - uy * 0.3 + ny * WALK_OFF)
-            keep_walk([a, b])
+            keep_walk([a, b], bool(pr.get("bazaar")))
     for el in sorted(raw_osm.get("elements", []), key=lambda e: e["id"]):
         if el["type"] != "way" or el.get("tags", {}).get("highway") not in FOOT_CLASSES:
             continue
@@ -624,7 +627,7 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
         "note": "Lane graph for left-hand traffic (build_slice.py). Lane: p=flat [x,y,...] polyline (local metres), "
                 "n=next lane ids, a/b=from/to node, c=class (0 main, 1 residential, 2 service/lane), w=road width, "
                 "j=junction connector, r=on the Badi Chaupar ring, y=give way (enters the ring). Node: [x, y, 1 if slice edge]. "
-                "walks: pedestrian polylines.",
+                "walks: pedestrian polylines; busy: 1 for walks along bazaar shop fronts.",
         "ring": {"c": [r1(lg["ring"][0][0]), r1(lg["ring"][0][1])], "r": r1(lg["ring"][1])},
         "nodes": [[r1(nodes[n][0]), r1(nodes[n][1]), 1 if n in lg["boundary"] else 0] for n in used],
         "lanes": [
@@ -634,6 +637,7 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
             for L in lanes
         ],
         "walks": [[r1(v) for q in w for v in q] for w in lg["walks"]],
+        "busy": lg["busy"],
     }
     path = ROOT / "data/build" / f"{sl}.lanes.json"
     path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
