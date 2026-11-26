@@ -1,5 +1,7 @@
 import {
   BufferGeometry,
+  Color,
+  Float32BufferAttribute,
   ConeGeometry,
   ExtrudeGeometry,
   Group,
@@ -12,8 +14,8 @@ import {
   Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { toon } from '../render/materials';
-import type { PaletteKey } from '../render/palette';
+import { toonVertex } from '../render/materials';
+import { palette, type PaletteKey } from '../render/palette';
 import type { FootprintCollection, FootprintFeature } from './footprints';
 import { at, Batch, unitBox } from './instancing';
 import { chance, int, pick, rngFor, type Rng } from './rng';
@@ -28,6 +30,15 @@ import { chance, int, pick, rngFor, type Rng } from './rng';
 
 export const GROUND_FLOOR_H = 3.8;
 export const FLOOR_H = 3.4;
+/** Neighbouring buildings vary within their colour family so streets don't look flat. */
+const SHADES: Partial<Record<PaletteKey, readonly PaletteKey[]>> = {
+  terracotta: ['terracotta', 'terracotta', 'terracottaLight', 'terracottaDusty'],
+  terracottaShade: ['terracottaShade', 'terracottaDusty'],
+  sandstone: ['sandstone', 'ochre'],
+  limeWhite: ['limeWhite', 'limeWhiteShade'],
+};
+/** Wall base darkening (fake ambient occlusion): vertex colour factor at ground level. */
+const AO_BASE = 0.82;
 const BAY_TARGET = 3.2; // metres per arcade bay / window bay
 const KIOSK_AREA = 20;
 
@@ -48,7 +59,10 @@ export interface ShopHouseSpec {
   rings: Pt[][]; // [outer CCW, ...holes]
   levels: number;
   height: number;
+  /** Colour family of the walls (tests and rules use this). */
   wall: PaletteKey;
+  /** The exact palette shade used for this building's walls (seeded variation within the family). */
+  shade: PaletteKey;
   fronts: FrontSpec[];
   chhatri: Pt | null;
 }
@@ -126,7 +140,9 @@ export function describeShopHouse(f: FootprintFeature, worldSeed = 1): ShopHouse
     chhatri = [corner[0] + (dx / d) * pull, corner[1] + (dy / d) * pull];
   }
 
-  return { id: f.properties.id, rings, levels, height, wall, fronts, chhatri };
+  // Drawn last so adding it didn't change any earlier choices.
+  const shade = pick(rng, SHADES[wall] ?? [wall]);
+  return { id: f.properties.id, rings, levels, height, wall, shade, fronts, chhatri };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +173,23 @@ function onFace(a: Pt, b: Pt, along: number, y: number, width: number, height: n
 }
 
 function wallGeometry(spec: ShopHouseSpec): BufferGeometry | null {
+  const g = extrude(spec);
+  if (!g) return null;
+  // Bake the palette shade per vertex, darker at the foot of the wall.
+  const base = new Color(palette[spec.shade]);
+  const pos = g.getAttribute('position');
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const k = pos.getY(i) < 0.01 ? AO_BASE : 1;
+    col[i * 3] = base.r * k;
+    col[i * 3 + 1] = base.g * k;
+    col[i * 3 + 2] = base.b * k;
+  }
+  g.setAttribute('color', new Float32BufferAttribute(col, 3));
+  return g;
+}
+
+function extrude(spec: ShopHouseSpec): BufferGeometry | null {
   const toV = ([x, y]: Pt) => new Vector2(x, y);
   const shape = new Shape(spec.rings[0].map(toV));
   for (const h of spec.rings.slice(1)) if (h.length >= 4) shape.holes.push(new Path(h.map(toV)));
@@ -183,7 +216,7 @@ export function buildShopHouses(
     .map((f) => describeShopHouse(f, worldSeed))
     .filter((s): s is ShopHouseSpec => s !== null);
 
-  const walls = new Map<PaletteKey, BufferGeometry[]>();
+  const walls: BufferGeometry[] = [];
 
   const dome = new ConeGeometry(0.5, 1, 8, 1);
   const batches = {
@@ -201,11 +234,7 @@ export function buildShopHouses(
 
   for (const s of specs) {
     const g = wallGeometry(s);
-    if (g) {
-      const list = walls.get(s.wall) ?? [];
-      list.push(g);
-      walls.set(s.wall, list);
-    }
+    if (g) walls.push(g);
 
     for (const f of s.fronts) {
       const len = Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1]);
@@ -263,12 +292,12 @@ export function buildShopHouses(
 
   const group = new Group();
   group.name = 'shopHouses';
-  for (const [colour, geoms] of walls) {
-    const merged = mergeGeometries(geoms);
-    geoms.forEach((g) => g.dispose());
-    if (!merged) continue;
-    const mesh = new Mesh(merged, toon(colour));
-    mesh.name = `walls:${colour}`;
+  // All walls in ONE draw call: colour comes from the baked vertex colours.
+  const merged = walls.length ? mergeGeometries(walls) : null;
+  walls.forEach((g) => g.dispose());
+  if (merged) {
+    const mesh = new Mesh(merged, toonVertex());
+    mesh.name = 'walls';
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);

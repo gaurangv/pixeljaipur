@@ -9,6 +9,9 @@ export const palette = {
   terracotta: 0xd98a6c, // the "pink" of the Pink City (really a terracotta wash)
   terracottaShade: 0xb5684f,
   terracottaDeep: 0x8f4c3c,
+  terracottaLight: 0xe49d7f, // per-building variation
+  terracottaDusty: 0xc98a72,
+  ochre: 0xd8a35e,
   sandstone: 0xd9b98c, // paving, kerbs, Hawa Mahal base
   sandstoneShade: 0xb39468,
   limeWhite: 0xf2eadb, // lime-wash borders and motifs on facades
@@ -34,6 +37,25 @@ export const palette = {
   open: 0xb9a578, // squares, chowks, open land
   green: 0x7a8f4a, // gardens
   ground: 0xa89270, // unmapped ground under everything
+
+  // Trees
+  treeDark: 0x4a6533,
+  treeMid: 0x67873d,
+  treeLight: 0x8ea852,
+  trunk: 0x6b4a32,
+
+  // Roof clutter and street props
+  tankBlack: 0x2f2b2b, // the ubiquitous black plastic water tank
+  dishGrey: 0xbcb6ad,
+  autoGreen: 0x4f8a2e, // Jaipur auto-rickshaw body
+  autoYellow: 0xf2c230, // auto-rickshaw canopy
+  tyre: 0x262222,
+
+  // Diorama base
+  plinthSide: 0xb08c62,
+  plinthBand: 0x8c6b4a,
+  backdropTop: 0xe9dcc6,
+  backdropBottom: 0xcdb89a,
 
   // Lines
   outline: 0x3a2622, // 1 px depth-edge outline (warm dark brown, never pure black)

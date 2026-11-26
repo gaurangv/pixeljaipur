@@ -1,4 +1,4 @@
-import { DataTexture, MeshToonMaterial, NearestFilter, RedFormat, UnsignedByteType } from 'three';
+import { Color, DataTexture, MeshToonMaterial, NearestFilter, RedFormat, UnsignedByteType } from 'three';
 import { palette, type PaletteKey } from './palette';
 
 /**
@@ -25,4 +25,15 @@ export function toon(colour: PaletteKey): MeshToonMaterial {
     cache.set(colour, m);
   }
   return m;
+}
+
+let vertexToon: MeshToonMaterial | null = null;
+
+/** Toon material whose colour comes from the geometry's `color` attribute (palette colours baked per vertex). */
+export function toonVertex(): MeshToonMaterial {
+  if (!vertexToon) {
+    vertexToon = new MeshToonMaterial({ color: new Color(1, 1, 1), gradientMap, vertexColors: true });
+    vertexToon.name = 'toon:vertex';
+  }
+  return vertexToon;
 }
