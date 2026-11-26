@@ -24,7 +24,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Colours:** every scene colour comes from `src/render/palette.ts`. No inline hex in scene code.
 - **Units:** world units are metres. Local origin is Badi Chaupar. Data is +x east, +y north. three.js is +x east, +y up, **−z north**.
 - **Projection:** 2:1 dimetric (30° elevation, azimuth 45° + 90°·rot), orthographic. Do not change it to true isometric.
-- **Pixels:** render into a low-res target where one texel = `mpp` metres, then nearest-neighbour upscale by an integer `zoom`. Zoom never changes `mpp`.
+- **Pixels:** render into a low-res target where one texel = `mpp` metres (default 0.33), then nearest-neighbour upscale by an integer `zoom`. Zoom never changes `mpp`.
 - **No shimmer:** the camera target is texel-snapped (`snapToTexel`). The remainder goes to the upscale shader as a sub-pixel offset.
 - **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `seed`, `outline`, `shot=1` (later `t`). The `#z/x/y/rot` hash is the shareable view. Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
 - **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).

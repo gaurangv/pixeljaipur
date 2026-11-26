@@ -21,7 +21,7 @@ import { buildShopHouses } from './world/shopHouse';
 /**
  * View state comes from (highest first): query params, the #z/x/y/rot hash, then the default
  * view on Hawa Mahal. Query params keep screenshots deterministic:
- *   mpp     metres per render-target pixel (0.33 | 0.5 | 1)   default 0.5
+ *   mpp     metres per render-target pixel (0.33 | 0.5 | 1)   default 0.33
  *   zoom    integer upscale factor (device px per texel)        default 3 x devicePixelRatio
  *   rot     snap rotation 0..3                                  default 0
  *   x, y    camera target in local metres (east, north)         default: in front of Hawa Mahal
@@ -51,7 +51,7 @@ const fromHash = parseHash(location.hash) ?? {};
 const view = { ...defaultView, ...fromHash };
 
 const state = {
-  mpp: num('mpp') ?? 0.5,
+  mpp: num('mpp') ?? 0.33,
   zoom: Math.min(MAX_ZOOM, Math.max(1, Math.round(num('zoom') ?? view.zoom))),
   rot: normalizeRot(num('rot') ?? view.rot),
   // three.js world: +x east, -z north

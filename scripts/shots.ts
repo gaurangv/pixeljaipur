@@ -12,7 +12,7 @@ import { createServer } from 'vite';
 
 const args = process.argv.slice(2);
 const only = args.includes('--mpp') ? [Number(args[args.indexOf('--mpp') + 1])] : null;
-const scales = only ?? [0.33, 0.5, 1];
+const scales = only ?? [0.33, 0.5];
 /** Extra query string, e.g. --q "zoom=6&x=20&y=40"; adds a suffix to file names. */
 const extra = args.includes('--q') ? args[args.indexOf('--q') + 1] : '';
 const rotsArg = args.includes('--rot') ? [Number(args[args.indexOf('--rot') + 1])] : null;
