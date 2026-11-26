@@ -6,3 +6,4 @@ tests/shots/
 *.log
 .env
 *.state
+.claude/
