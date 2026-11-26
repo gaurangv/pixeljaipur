@@ -1,7 +1,7 @@
 import { CylinderGeometry, Group, Matrix4, Quaternion, Vector3 } from 'three';
 import type { PaletteKey } from '../render/palette';
 import { pointInRing, type Pt } from './geometry';
-import { Batch, unitBox } from './instancing';
+import { Batch, buildPooled, unitBox } from './instancing';
 import { chance, int, pick, range, rngFor } from './rng';
 import { onFace, type ShopHouseSpec } from './shopHouse';
 
@@ -169,9 +169,6 @@ export function buildRoofs(specs: ShopHouseSpec[], worldSeed = 1): Group {
 
   const group = new Group();
   group.name = 'roofs';
-  for (const b of [...shade.values(), cap, capMuted, door, tank, dish, post, ...Object.values(cloth)]) {
-    const m = b.build();
-    if (m) group.add(m);
-  }
+  for (const m of buildPooled([...shade.values(), cap, capMuted, door, tank, dish, post, ...Object.values(cloth)], 'roofs')) group.add(m);
   return group;
 }

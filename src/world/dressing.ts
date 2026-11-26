@@ -11,7 +11,7 @@ import {
 import { palette, type PaletteKey } from '../render/palette';
 import type { FootprintCollection } from './footprints';
 import { pointInRing } from './geometry';
-import { Batch, unitBox } from './instancing';
+import { Batch, buildPooled, unitBox } from './instancing';
 import { chance, int, pick, range, rngFor, type Rng } from './rng';
 import { GROUND_FLOOR_H, type FrontSpec, type ShopHouseSpec } from './shopHouse';
 
@@ -204,10 +204,10 @@ export function buildDressing(specs: ShopHouseSpec[], data: FootprintCollection,
 
   const group = new Group();
   group.name = 'dressing';
-  for (const b of [...Object.values(awning), ...Object.values(sign), ...Object.values(fruit), cart, cow, cowDark, autoBody, autoTop, tyre, ...Object.values(scooter), seat]) {
-    const m = b.build();
-    if (m) group.add(m);
-  }
+  for (const m of buildPooled(
+    [...Object.values(awning), ...Object.values(sign), ...Object.values(fruit), cart, cow, cowDark, autoBody, autoTop, tyre, ...Object.values(scooter), seat],
+    'dressing',
+  )) group.add(m);
   if (verts.length) {
     const g = new BufferGeometry();
     g.setAttribute('position', new Float32BufferAttribute(verts, 3));

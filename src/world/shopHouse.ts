@@ -17,7 +17,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { toonVertex } from '../render/materials';
 import { palette, type PaletteKey } from '../render/palette';
 import type { FootprintCollection, FootprintFeature } from './footprints';
-import { at, Batch, unitBox } from './instancing';
+import { at, Batch, buildPooled, unitBox } from './instancing';
 import { chance, int, pick, rngFor, type Rng } from './rng';
 
 /*
@@ -342,13 +342,8 @@ export function buildShopHouses(
     mesh.receiveShadow = true;
     group.add(mesh);
   }
-  let instances = 0;
-  for (const b of Object.values(batches)) {
-    const m = b.build();
-    if (m) {
-      group.add(m);
-      instances += b.matrices.length;
-    }
-  }
+  const all = Object.values(batches);
+  const instances = all.reduce((n, b) => n + b.matrices.length, 0);
+  for (const m of buildPooled(all, 'shopHouses')) group.add(m);
   return { group, specs, stats: { buildings: specs.length, instances } };
 }

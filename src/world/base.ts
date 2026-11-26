@@ -1,7 +1,7 @@
 import { ExtrudeGeometry, Group, Mesh, Shape, Vector2, type Material } from 'three';
 import { toon } from '../render/materials';
 import type { Pt } from './geometry';
-import { Batch, unitBox } from './instancing';
+import { Batch, buildPooled, unitBox } from './instancing';
 import { onFace } from './shopHouse';
 
 /*
@@ -50,9 +50,6 @@ export function buildBase(boundary: Pt[], groundMaterial: Material): Group {
   const group = new Group();
   group.name = 'diorama';
   group.add(mesh);
-  for (const b of [coping, band]) {
-    const m = b.build();
-    if (m) group.add(m);
-  }
+  for (const m of buildPooled([coping, band], 'base')) group.add(m);
   return group;
 }

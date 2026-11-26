@@ -2,7 +2,7 @@ import { Group, IcosahedronGeometry } from 'three';
 import type { PaletteKey } from '../render/palette';
 import type { FootprintCollection, FootprintFeature } from './footprints';
 import { pointInRing, type Pt } from './geometry';
-import { at, Batch, unitBox } from './instancing';
+import { at, Batch, buildPooled, unitBox } from './instancing';
 import { chance, int, range, rngFor, type Rng } from './rng';
 
 /*
@@ -161,9 +161,6 @@ export function buildTrees(trees: TreeSpot[], worldSeed = 1): Group {
   }
   const group = new Group();
   group.name = 'trees';
-  for (const b of [trunk, ...Object.values(canopy)]) {
-    const m = b.build();
-    if (m) group.add(m);
-  }
+  for (const m of buildPooled([trunk, ...Object.values(canopy)], 'trees')) group.add(m);
   return group;
 }

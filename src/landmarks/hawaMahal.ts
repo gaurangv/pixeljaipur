@@ -1,5 +1,5 @@
 import { ConeGeometry, CylinderGeometry, Group, Matrix4, Quaternion, Vector3 } from 'three';
-import { at, Batch, unitBox } from '../world/instancing';
+import { at, Batch, buildPooled, unitBox } from '../world/instancing';
 
 /*
  * Hawa Mahal (1799): a five-storey screen of small jharokha bays stacked into a
@@ -121,10 +121,7 @@ export function buildHawaMahal(p: HawaMahalPlacement, h = HAWA): Group {
 
   const group = new Group();
   group.name = 'hawaMahal';
-  for (const batch of Object.values(b)) {
-    const m = batch.build();
-    if (m) group.add(m);
-  }
+  for (const m of buildPooled(Object.values(b), 'hawaMahal')) group.add(m);
 
   // Place: local +z must point along `facingDeg` (data coords), world = (x, 0, -y).
   const th = (p.facingDeg * Math.PI) / 180;

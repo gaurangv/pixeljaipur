@@ -38,6 +38,17 @@ export function toonVertex(): MeshToonMaterial {
   return vertexToon;
 }
 
+let instancedToon: MeshToonMaterial | null = null;
+
+/** White toon material for pooled InstancedMeshes: colour comes from per-instance colours. */
+export function toonInstanced(): MeshToonMaterial {
+  if (!instancedToon) {
+    instancedToon = new MeshToonMaterial({ color: new Color(1, 1, 1), gradientMap });
+    instancedToon.name = 'toon:instanced';
+  }
+  return instancedToon;
+}
+
 export type DitherPattern = 'soil' | 'speckle' | 'paving';
 
 /**
