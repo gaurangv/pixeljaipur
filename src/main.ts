@@ -17,6 +17,7 @@ import { buildDressing } from './world/dressing';
 import { buildFootprints, loadSlice } from './world/footprints';
 import { pickPlace } from './world/picking';
 import { buildRoofs } from './world/roofs';
+import { buildTrees, placeTrees } from './world/trees';
 import { buildShopHouses } from './world/shopHouse';
 
 /**
@@ -278,6 +279,7 @@ async function start() {
     const houses = buildShopHouses(slice, seed);
     scene.add(houses.group);
     scene.add(buildRoofs(houses.specs, seed));
+    scene.add(buildTrees(placeTrees(slice, seed), seed));
     scene.add(buildDressing(houses.specs, slice, seed));
     if (hawa) scene.add(buildHawaMahal(hawa));
   } catch (err) {
