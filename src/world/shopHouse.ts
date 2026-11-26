@@ -39,7 +39,9 @@ const SHADES: Partial<Record<PaletteKey, readonly PaletteKey[]>> = {
 };
 /** Wall base darkening (fake ambient occlusion): vertex colour factor at ground level. */
 const AO_BASE = 0.82;
-const BAY_TARGET = 3.2; // metres per arcade bay / window bay
+const BAY_TARGET = 3.2;
+const SIDE_MIN = 4; // side walls shorter than this stay blank
+const SIDE_BAY = 3.6; // metres per arcade bay / window bay
 const KIOSK_AREA = 20;
 
 type Pt = [number, number];
@@ -54,6 +56,16 @@ export interface FrontSpec {
   arcade: boolean;
 }
 
+/** A plain side/back wall: small windows on the upper floors, maybe a drainpipe. */
+export interface SideSpec {
+  edge: number;
+  a: Pt;
+  b: Pt;
+  /** windows per upper floor */
+  windows: number;
+  pipe: boolean;
+}
+
 export interface ShopHouseSpec {
   id: string;
   rings: Pt[][]; // [outer CCW, ...holes]
@@ -64,6 +76,7 @@ export interface ShopHouseSpec {
   /** The exact palette shade used for this building's walls (seeded variation within the family). */
   shade: PaletteKey;
   fronts: FrontSpec[];
+  sides: SideSpec[];
   chhatri: Pt | null;
 }
 
@@ -142,7 +155,20 @@ export function describeShopHouse(f: FootprintFeature, worldSeed = 1): ShopHouse
 
   // Drawn last so adding it didn't change any earlier choices.
   const shade = pick(rng, SHADES[wall] ?? [wall]);
-  return { id: f.properties.id, rings, levels, height, wall, shade, fronts, chhatri };
+
+  const sides: SideSpec[] = [];
+  if (levels >= 2) {
+    const frontSet = new Set(fronts.map((fr) => fr.edge));
+    for (let edge = 0; edge < outer.length - 1; edge++) {
+      if (frontSet.has(edge)) continue;
+      const a = outer[edge];
+      const b = outer[edge + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < SIDE_MIN) continue;
+      sides.push({ edge, a, b, windows: Math.max(1, Math.floor(len / SIDE_BAY)), pipe: chance(rng, 0.25) });
+    }
+  }
+  return { id: f.properties.id, rings, levels, height, wall, shade, fronts, sides, chhatri };
 }
 
 // ---------------------------------------------------------------------------
@@ -220,15 +246,17 @@ export function buildShopHouses(
 
   const dome = new ConeGeometry(0.5, 1, 8, 1);
   const batches = {
-    arch: new Batch('arch', unitBox, 'terracottaDeep'),
+    arch: new Batch('arch', unitBox, 'terracottaDeep', false),
     pillar: new Batch('pillar', unitBox, 'terracottaShade'),
-    archTrim: new Batch('archTrim', unitBox, 'limeWhite'),
+    archTrim: new Batch('archTrim', unitBox, 'limeWhite', false),
     chhajja: new Batch('chhajja', unitBox, 'sandstone'),
-    window: new Batch('window', unitBox, 'terracottaDeep'),
+    window: new Batch('window', unitBox, 'terracottaDeep', false),
     jharokha: new Batch('jharokha', unitBox, 'limeWhite'),
     jharokhaCap: new Batch('jharokhaCap', unitBox, 'sandstoneShade'),
     chhatriPillar: new Batch('chhatriPillar', unitBox, 'limeWhite'),
     chhatriDome: new Batch('chhatriDome', dome, 'limeWhiteShade'),
+    sill: new Batch('sill', unitBox, 'limeWhiteShade', false),
+    pipe: new Batch('pipe', unitBox, 'dishGrey', false),
   };
 
   for (const s of specs) {
@@ -272,6 +300,21 @@ export function buildShopHouses(
         });
       });
 
+    }
+
+    // Side and back walls: modest window rows with sills, the odd drainpipe.
+    for (const sd of s.sides) {
+      const len = Math.hypot(sd.b[0] - sd.a[0], sd.b[1] - sd.a[1]);
+      const step = len / sd.windows;
+      for (let fl = 1; fl < s.levels; fl++) {
+        const y0 = GROUND_FLOOR_H + FLOOR_H * (fl - 1) + 1.0;
+        for (let i = 0; i < sd.windows; i++) {
+          const c = (i + 0.5) * step;
+          batches.window.add(onFace(sd.a, sd.b, c, y0, 0.8, 1.2, 0.05));
+          batches.sill.add(onFace(sd.a, sd.b, c, y0 - 0.12, 1.0, 0.12, 0.18));
+        }
+      }
+      if (sd.pipe) batches.pipe.add(onFace(sd.a, sd.b, 0.4, 0, 0.14, s.height, 0.18));
     }
 
     if (s.chhatri) {

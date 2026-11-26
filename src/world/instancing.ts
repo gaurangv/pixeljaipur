@@ -12,6 +12,8 @@ export class Batch {
     readonly name: string,
     readonly geometry: BufferGeometry,
     readonly colour: PaletteKey,
+    /** Small details (windows, sills, doors) skip the shadow pass: invisible there, and halves their cost. */
+    readonly castShadow = true,
   ) {}
 
   add(m: Matrix4): void {
@@ -24,7 +26,7 @@ export class Batch {
     this.matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
-    mesh.castShadow = true;
+    mesh.castShadow = this.castShadow;
     mesh.receiveShadow = true;
     mesh.name = this.name;
     return mesh;

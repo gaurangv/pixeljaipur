@@ -68,7 +68,7 @@ export function buildHawaMahal(p: HawaMahalPlacement, h = HAWA): Group {
     mass: new Batch('hm:mass', unitBox, 'terracottaShade'),
     bay: new Batch('hm:bay', unitBox, 'terracotta'),
     bayTrim: new Batch('hm:bayTrim', unitBox, 'limeWhite'),
-    window: new Batch('hm:window', unitBox, 'terracottaDeep'),
+    window: new Batch('hm:window', unitBox, 'terracottaDeep', false),
     cap: new Batch('hm:cap', dome, 'terracotta'),
     ledge: new Batch('hm:ledge', unitBox, 'limeWhiteShade'),
     finial: new Batch('hm:finial', finialGeo, 'limeWhiteShade'),

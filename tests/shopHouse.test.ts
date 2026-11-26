@@ -47,6 +47,13 @@ describe('describeShopHouse', () => {
     expect(s.fronts[0].jharokhas[0]).toHaveLength(4);
   });
 
+  it('puts window rows on long non-front walls of multi-storey buildings only', () => {
+    const s = describeShopHouse(rect('sides', { bazaar: true }))!; // 12 x 8, front = edge 0
+    expect(s.sides.map((d) => d.edge).sort()).toEqual([1, 2, 3]);
+    expect(s.sides.find((d) => d.edge === 2)!.windows).toBe(3); // 12 m back wall
+    expect(describeShopHouse(rect('kiosk', {}, 4, 4))!.sides).toEqual([]);
+  });
+
   it('only decorates listed front edges', () => {
     expect(describeShopHouse(rect('n', { front: [] }))!.fronts).toEqual([]);
   });

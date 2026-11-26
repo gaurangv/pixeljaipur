@@ -120,13 +120,13 @@ export function buildRoofs(specs: ShopHouseSpec[], worldSeed = 1): Group {
     if (!b) shade.set(k, (b = new Batch(`roof:${k}`, unitBox, k)));
     return b;
   };
-  const cap = new Batch('roof:cap', unitBox, 'limeWhite');
+  const cap = new Batch('roof:cap', unitBox, 'limeWhite', false);
   const capMuted = new Batch('roof:capMuted', unitBox, 'limeWhiteShade');
-  const door = new Batch('roof:door', unitBox, 'terracottaDeep');
+  const door = new Batch('roof:door', unitBox, 'terracottaDeep', false);
   const tank = new Batch('roof:tank', tankGeo, 'tankBlack');
   const dish = new Batch('roof:dish', dishGeo, 'dishGrey');
   const post = new Batch('roof:post', unitBox, 'trunk');
-  const cloth = Object.fromEntries(LAUNDRY.map((k) => [k, new Batch(`roof:cloth:${k}`, unitBox, k)])) as Record<PaletteKey, Batch>;
+  const cloth = Object.fromEntries(LAUNDRY.map((k) => [k, new Batch(`roof:cloth:${k}`, unitBox, k, false)])) as Record<PaletteKey, Batch>;
 
   for (const s of specs) {
     const ring = s.rings[0];
