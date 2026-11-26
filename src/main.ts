@@ -4,7 +4,8 @@ import { toon } from './render/materials';
 import { skyFor } from './render/palette';
 import { addLighting } from './sky/light';
 import { PixelPass } from './render/pixelPass';
-import { loadFootprints } from './world/footprints';
+import { buildFootprints, loadSlice } from './world/footprints';
+import { buildShopHouses } from './world/shopHouse';
 import sliceUrl from '../data/build/slice1.geojson?url';
 
 /**
@@ -13,6 +14,8 @@ import sliceUrl from '../data/build/slice1.geojson?url';
  *   zoom  integer upscale factor                              default 3
  *   rot   snap rotation 0..3                                  default 0
  *   x, y  camera target in local metres (east, north)         default: between Badi Chaupar and Hawa Mahal
+ *   seed  world seed for procedural generation          default 1
+ *   outline 0 = disable the 1 px depth outline
  *   shot  1 = render once, then set window.__pjReady          (for scripts/shots.ts)
  */
 const params = new URLSearchParams(location.search);
@@ -29,6 +32,8 @@ const state = {
   target: new Vector3(num('x', 0), 0, -num('y', 80)),
 };
 const shotMode = params.get('shot') === '1';
+const outline = params.get('outline') !== '0';
+const seed = Math.round(num('seed', 1));
 
 declare global {
   interface Window {
@@ -42,6 +47,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFShadowMap;
 const pixel = new PixelPass(renderer);
 const camera = createCamera();
+// Ground one texel further up-screen is mpp / tan(30°) ≈ 1.73·mpp deeper; edges must jump more than that.
+pixel.setOutline(outline, Math.max(1.0, 3 * state.mpp));
 
 const scene = new Scene();
 scene.background = new Color(skyFor.noon);
@@ -118,7 +125,11 @@ window.addEventListener('resize', () => {
 async function start() {
   resize();
   try {
-    scene.add(await loadFootprints(sliceUrl));
+    const slice = await loadSlice(sliceUrl);
+    scene.add(buildFootprints(slice, { skip: ['building'] }));
+    const houses = buildShopHouses(slice, seed);
+    scene.add(houses.group);
+    console.info('[pixeljaipur] shop-houses', houses.stats);
   } catch (err) {
     console.error('[pixeljaipur] footprints failed to load', err);
   }

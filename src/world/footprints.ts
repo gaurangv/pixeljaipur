@@ -59,11 +59,11 @@ export function featureShapes(feature: FootprintFeature): Shape[] {
 }
 
 /** Build one merged mesh per kind, so the whole slice costs about six draw calls. */
-export function buildFootprints(data: FootprintCollection): Group {
+export function buildFootprints(data: FootprintCollection, { skip = [] as FootprintKind[] } = {}): Group {
   const byKind = new Map<FootprintKind, BufferGeometry[]>();
   for (const f of data.features) {
     const kind = f.properties.kind;
-    if (!(kind in LAYERS)) continue;
+    if (!(kind in LAYERS) || skip.includes(kind)) continue;
     const list = byKind.get(kind) ?? [];
     for (const shape of featureShapes(f)) list.push(new ShapeGeometry(shape));
     byKind.set(kind, list);
@@ -86,8 +86,8 @@ export function buildFootprints(data: FootprintCollection): Group {
   return group;
 }
 
-export async function loadFootprints(url: string): Promise<Group> {
+export async function loadSlice(url: string): Promise<FootprintCollection> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-  return buildFootprints((await res.json()) as FootprintCollection);
+  return (await res.json()) as FootprintCollection;
 }

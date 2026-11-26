@@ -6,7 +6,7 @@ import { palette, type PaletteKey } from './palette';
  * Shared by every lit material so the whole city reads as one style.
  */
 const gradientMap = (() => {
-  const tex = new DataTexture(new Uint8Array([90, 170, 255]), 3, 1, RedFormat, UnsignedByteType);
+  const tex = new DataTexture(new Uint8Array([120, 185, 255]), 3, 1, RedFormat, UnsignedByteType);
   tex.minFilter = NearestFilter;
   tex.magFilter = NearestFilter;
   tex.generateMipmaps = false;

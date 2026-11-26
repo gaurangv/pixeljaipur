@@ -41,6 +41,8 @@ MAIN_ROADS = {"trunk", "primary", "secondary", "tertiary"}
 FRONT_DIST = 6.0  # an edge counts as a street front if its midpoint is this close to a road
 OVERLAP_MAX = 0.3  # drop an Overture building if this share of it is already covered by OSM/roads
 MIN_AREA = 6.0
+INSET = 0.05  # m, shrink every footprint so shared walls don't z-fight
+SIMPLIFY = 0.4  # m, tolerance for simplifying Overture footprints
 ISLAND_MAX = 3000.0  # m^2; road-enclosed holes smaller than this are islands
 
 # Frontage fill: lots generated where neither OSM nor Overture has a building.
@@ -209,7 +211,8 @@ def main() -> None:
         if src == "OpenStreetMap":
             continue  # already have OSM directly (and fresher)
         tag = {"Google Open Buildings": "google", "Microsoft ML Buildings": "microsoft", "Esri Community Maps": "esri"}.get(src, "other")
-        geom = shapely.transform(shape(f["geometry"]), to_local).intersection(clip)
+        # Machine-traced outlines are jagged; simplify so walls read as clean planes.
+        geom = shapely.transform(shape(f["geometry"]), to_local).simplify(SIMPLIFY, preserve_topology=True).intersection(clip)
         for i, p in enumerate(to_polys(geom)):
             if p.area < MIN_AREA:
                 continue
@@ -250,7 +253,11 @@ def main() -> None:
     # --- fronts, orientation, output -------------------------------------------
     out_feats = [f for f in feats if f["properties"]["kind"] not in ("building", "centerline")]
     for poly, props in buildings:
-        poly = orient(rnd(poly), 1.0)  # CCW exterior
+        # Inset slightly so neighbours never share a coplanar wall (z-fighting stripes).
+        inset = to_polys(poly.buffer(-INSET, join_style="mitre"))
+        if not inset:
+            continue
+        poly = orient(rnd(max(inset, key=lambda q: q.area)), 1.0)  # CCW exterior
         if not poly.is_valid or poly.area < MIN_AREA:
             continue
         fronts, bazaar = front_edges(poly, roads, major)
