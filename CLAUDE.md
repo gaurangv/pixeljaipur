@@ -1,0 +1,32 @@
+# PixelJaipur
+
+A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in three.js. It starts with the Hawa Mahal / Badi Chaupar slice and grows phase by phase. Full plan: `docs/PLAN.md` (read the "Review amendments" at the end; they override earlier text). Decisions: `docs/DECISIONS.md`. Add a line there whenever we change course.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server on http://localhost:5173 |
+| `npm test` | Vitest (pure logic in `tests/*.test.ts`) |
+| `npm run shots` | Headless screenshots to `tests/shots/mpp{scale}-rot{0..3}.png` (`-- --mpp 0.5` for one scale) |
+| `npm run build` | Typecheck + production build to `dist/` |
+| `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.geojson` |
+
+(uv installs the script deps on first run; `.venv/` is an optional fallback.)
+
+## Conventions
+
+- **Colours:** every scene colour comes from `src/render/palette.ts`. No inline hex in scene code.
+- **Units:** world units are metres. Local origin is Badi Chaupar. Data is +x east, +y north. three.js is +x east, +y up, **−z north**.
+- **Projection:** 2:1 dimetric (30° elevation, azimuth 45° + 90°·rot), orthographic. Do not change it to true isometric.
+- **Pixels:** render into a low-res target where one texel = `mpp` metres, then nearest-neighbour upscale by an integer `zoom`. Zoom never changes `mpp`.
+- **No shimmer:** the camera target is texel-snapped (`snapToTexel`). The remainder goes to the upscale shader as a sub-pixel offset.
+- **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `shot=1` (later `seed`, `t`). Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
+- **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).
+- **Data:** never hand-edit `data/raw/`. Regenerate `data/build/` with the script. Both are committed.
+- **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM attribution stays visible on the page.
+- **Workflow:** one phase per branch, small commit per task, plan mode before each phase. After any visual change, run `npm run shots` and look at the PNGs before calling it done.
+
+## Layout
+
+`src/render` camera, pixel pass, palette · `src/world` ground, roads, buildings, generators · `src/landmarks` hand-built landmarks · `src/actors` agents · `src/sky` sun/day/weather · `src/audio` · `src/ui` · `scripts/` data + screenshot tools · `data/boundary` slice polygons (WGS84).

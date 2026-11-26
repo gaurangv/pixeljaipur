@@ -1,0 +1,24 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "slice1",
+        "description": "Phase 1 slice: Badi Chaupar, Hawa Mahal frontage, ~200 m of Johari Bazar. Hand-drawn; refine in geojson.io."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [75.8247, 26.9257],
+          [75.8289, 26.9257],
+          [75.8289, 26.9214],
+          [75.8276, 26.9198],
+          [75.8244, 26.9198],
+          [75.8247, 26.9214],
+          [75.8247, 26.9257]
+        ]]
+      }
+    }
+  ]
+}
