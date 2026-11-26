@@ -1,6 +1,7 @@
-import { BufferGeometry, Group, Mesh, MeshBasicMaterial, Path, Shape, ShapeGeometry, Vector2 } from 'three';
+import { BufferGeometry, Group, Mesh, Path, Shape, ShapeGeometry, Vector2 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { palette, type PaletteKey } from '../render/palette';
+import { toon } from '../render/materials';
+import type { PaletteKey } from '../render/palette';
 
 /** Feature kinds written by scripts/fetch_osm.py. */
 export type FootprintKind = 'open' | 'green' | 'water' | 'road' | 'footway' | 'building';
@@ -75,7 +76,8 @@ export function buildFootprints(data: FootprintCollection): Group {
     const merged = mergeGeometries(geoms);
     geoms.forEach((g) => g.dispose());
     if (!merged) continue;
-    const mesh = new Mesh(merged, new MeshBasicMaterial({ color: palette[LAYERS[kind].colour] }));
+    const mesh = new Mesh(merged, toon(LAYERS[kind].colour));
+    mesh.receiveShadow = true;
     mesh.name = kind;
     mesh.rotation.x = -Math.PI / 2; // shape XY plane -> ground XZ plane
     mesh.position.y = LAYERS[kind].y;

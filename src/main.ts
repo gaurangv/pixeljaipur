@@ -1,6 +1,8 @@
-import { Color, Mesh, MeshBasicMaterial, PlaneGeometry, Scene, Vector3, WebGLRenderer } from 'three';
+import { Color, Mesh, PCFShadowMap, PlaneGeometry, Scene, Vector3, WebGLRenderer } from 'three';
 import { cameraBasis, createCamera, normalizeRot, updateCamera } from './render/camera';
-import { palette, skyFor } from './render/palette';
+import { toon } from './render/materials';
+import { skyFor } from './render/palette';
+import { addLighting } from './sky/light';
 import { PixelPass } from './render/pixelPass';
 import { loadFootprints } from './world/footprints';
 import sliceUrl from '../data/build/slice1.geojson?url';
@@ -36,6 +38,8 @@ declare global {
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const renderer = new WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: shotMode });
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = PCFShadowMap;
 const pixel = new PixelPass(renderer);
 const camera = createCamera();
 
@@ -43,9 +47,11 @@ const scene = new Scene();
 scene.background = new Color(skyFor.noon);
 document.body.style.background = new Color(skyFor.noon).getStyle();
 
-const ground = new Mesh(new PlaneGeometry(4000, 4000), new MeshBasicMaterial({ color: palette.ground }));
+const ground = new Mesh(new PlaneGeometry(4000, 4000), toon('ground'));
 ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
 scene.add(ground);
+addLighting(scene);
 
 function resize() {
   pixel.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, state.zoom);
