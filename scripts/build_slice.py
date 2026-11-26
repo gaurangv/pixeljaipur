@@ -217,6 +217,12 @@ def build_places(sl: str, feats_out: list, landmark: dict, reserved: Polygon, to
             "zone": pt.buffer(15, quad_segs=8), "anchor": pt,
         })
 
+    # Higher-priority zones win where they overlap (e.g. the Badi Chaupar circle over the bazaar roads).
+    taken = Polygon()
+    for p in sorted(places, key=lambda p: -p["priority"]):
+        p["zone"] = p["zone"].difference(taken)
+        taken = taken.union(p["zone"])
+
     out = []
     for p in places:
         polys = to_polys(p["zone"].simplify(0.5))

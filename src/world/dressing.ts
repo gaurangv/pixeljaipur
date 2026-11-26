@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { palette, type PaletteKey } from '../render/palette';
 import type { FootprintCollection } from './footprints';
+import { pointInRing } from './geometry';
 import { Batch, unitBox } from './instancing';
 import { chance, pick, range, rngFor, type Rng } from './rng';
 import { GROUND_FLOOR_H, type FrontSpec, type ShopHouseSpec } from './shopHouse';
@@ -56,16 +57,6 @@ function faceBox(
   const yaw = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.atan2(fr.u[1], fr.u[0]));
   const tilt = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), (tiltDeg * Math.PI) / 180);
   return new Matrix4().compose(new Vector3(px, y + size[1] / 2, -py), yaw.multiply(tilt), new Vector3(...size));
-}
-
-function pointInRing(x: number, y: number, ring: Pt[]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
 }
 
 function onRoad(x: number, y: number, roads: Pt[][][]): boolean {

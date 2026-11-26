@@ -90,3 +90,39 @@ export function updateCamera(
   cam.updateProjectionMatrix();
   return snap;
 }
+
+/** Everything needed to map between world space and CSS pixels on the canvas. */
+export interface ScreenView {
+  target: Vector3;
+  rot: number;
+  mpp: number;
+  /** Visible render-target size in texels (PixelPass.size, without the margin). */
+  size: { x: number; y: number };
+  zoom: number;
+  dpr: number;
+}
+
+/**
+ * World point -> CSS pixel position on the canvas (top-left origin).
+ * Exact inverse of the pixel pass: the texel-snap remainder cancels out, so this
+ * equals the un-snapped projection (to within the 1-texel sampling of the upscale).
+ */
+export function worldToScreen(p: Vector3, v: ScreenView): { x: number; y: number } {
+  const { right, up } = cameraBasis(v.rot);
+  const d = p.clone().sub(v.target);
+  const k = v.zoom / v.dpr;
+  return {
+    x: (v.size.x / 2 + d.dot(right) / v.mpp) * k,
+    y: (v.size.y / 2 - d.dot(up) / v.mpp) * k,
+  };
+}
+
+/** CSS pixel -> world ray (origin far behind the screen, unit direction into the scene). */
+export function screenToRay(x: number, y: number, v: ScreenView): { origin: Vector3; dir: Vector3 } {
+  const { right, up, forward } = cameraBasis(v.rot);
+  const k = v.dpr / v.zoom;
+  const dr = (x * k - v.size.x / 2) * v.mpp;
+  const du = (v.size.y / 2 - y * k) * v.mpp;
+  const origin = v.target.clone().addScaledVector(right, dr).addScaledVector(up, du).addScaledVector(forward, -CAMERA_DISTANCE);
+  return { origin, dir: forward };
+}
