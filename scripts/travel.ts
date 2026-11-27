@@ -83,6 +83,7 @@ try {
     return ext ? String(gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
   });
   console.log(`renderer: ${renderer}`);
+  console.log('actors at the end:', await page.evaluate(() => (window as unknown as { __pjActors?: () => object }).__pjActors?.()));
   console.log(`frame ms: median ${pct(0.5)}, p95 ${pct(0.95)}, max ${pct(0.999)}; last frame calls=${stats?.calls} tris=${stats?.triangles}`);
   if (errors.length) console.log('page errors:', errors);
   if (worstGap > MAX_GAP || errors.length) process.exitCode = 1;

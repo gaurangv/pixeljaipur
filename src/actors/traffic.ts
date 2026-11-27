@@ -44,6 +44,25 @@ export function createTraffic(): System {
   group.name = 'actors';
   let city = false;
   let lastRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** City mode: pedestrian walks of the loaded chunks, applied to the crowd on the next update. */
+  const chunkWalks = new Map<string, { walks: number[][]; busy: number[] }>();
+  let walksDirty = false;
+  const applyWalks = () => {
+    walksDirty = false;
+    if (!crowd) return;
+    const walks: number[][] = [];
+    const busy: number[] = [];
+    const keys: string[] = [];
+    for (const id of [...chunkWalks.keys()].sort()) {
+      const c = chunkWalks.get(id)!;
+      c.walks.forEach((w, i) => {
+        walks.push(w);
+        busy.push(c.busy[i] ?? 0);
+        keys.push(`${id}:${i}`);
+      });
+    }
+    crowd.setWalks(walks, busy, keys);
+  };
   /** Keep traffic and people around the view (city mode). */
   const followView = (ctx: WorldContext, force = false) => {
     const r = viewGroundRect(ctx.screenView(), 60);
@@ -62,7 +81,9 @@ export function createTraffic(): System {
       const data = (city ? await fetch(cityLanesUrl!).then((r) => r.json()) : lanesData) as unknown as LanesJson;
       const graph = new LaneGraph(data);
       sim = new TrafficSim(graph, { seed: ctx.seed, hours, scatter: !city });
-      crowd = new Crowd(data.walks, { seed: ctx.seed, hours, looks: OUTFITS.length, busy: data.busy });
+      // City: walks stream in with the chunks (onChunk); the slice file carries its own.
+      crowd = new Crowd(city ? [] : data.walks, { seed: ctx.seed, hours, looks: OUTFITS.length, busy: data.busy });
+      if (city) applyWalks();
       const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
       flock = hawa ? new Flock(hawa, { seed: ctx.seed }) : null;
       if (city) {
@@ -77,7 +98,7 @@ export function createTraffic(): System {
       if (shot) {
         for (let i = 0; i < SHOT_STEPS; i++) {
           sim.step(SHOT_DT);
-          crowd.step(SHOT_DT);
+          if (!city) crowd.step(SHOT_DT); // city: once the chunks' walks are in (update)
         }
       } else {
         ctx.events.on('groundClick', ({ x, y }) => {
@@ -87,9 +108,22 @@ export function createTraffic(): System {
         });
       }
       meshes.update();
+      // debug / scripts: how many actors are out (scripts/travel.ts)
+      (window as unknown as { __pjActors?: () => object }).__pjActors = () => ({
+        people: crowd?.activeCount() ?? 0,
+        walks: crowd?.count ?? 0,
+        vehicles: sim?.vehicles.filter((v) => v.active).length ?? 0,
+      });
     },
     update(dt, now, ctx) {
       if (!sim || !crowd || !meshes) return;
+      if (walksDirty) {
+        applyWalks();
+        if (shot) {
+          for (let i = 0; i < SHOT_STEPS; i++) crowd.step(SHOT_DT);
+          meshes.update();
+        }
+      }
       if (shot) return; // placed once in init, deterministic
       const h = now.hoursIST;
       if (Math.abs(h - lastHour) > 1 / 60) {
@@ -103,6 +137,13 @@ export function createTraffic(): System {
       crowd.step(dt);
       flock?.step(dt);
       meshes.update();
+    },
+    onChunk(id, type, chunk) {
+      if (!city) return;
+      const pr = (chunk.data as { properties?: { walks?: number[][]; busy?: number[] } }).properties;
+      if (type === 'load' && pr?.walks?.length) chunkWalks.set(id, { walks: pr.walks, busy: pr.busy ?? [] });
+      else if (!(type === 'unload' && chunkWalks.delete(id))) return;
+      walksDirty = true;
     },
     animating() {
       return !shot && sim !== null;

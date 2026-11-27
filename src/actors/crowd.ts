@@ -40,25 +40,89 @@ export class Crowd {
   readonly walkers: Walker[] = [];
   readonly rng: Rng;
   density = 1;
-  readonly count: number;
-  private readonly xy: Float32Array;
-  private readonly cum: Float32Array;
-  private readonly start: Int32Array;
-  readonly length: Float32Array;
+  count = 0;
+  private xy = new Float32Array(0);
+  private cum = new Float32Array(0);
+  private start = new Int32Array(1);
+  length = new Float32Array(0);
   /** links[2*w + end] = flat list of (walk, end) pairs reachable from that end */
-  private readonly links: Int32Array[];
-
+  private links: Int32Array[] = [];
   /** weight of each walk when scattering people (bazaar fronts draw the crowds) */
-  private readonly weight: Float32Array;
+  private weight = new Float32Array(0);
+  /** stable key of each walk (city mode: "<chunk>:<i>"), to keep walkers on their walk across reloads */
+  private keys: string[] = [];
 
   constructor(
     walks: number[][],
     opts: { seed?: number; hours?: number; cap?: number; looks?: number; busy?: number[] } = {},
   ) {
     this.rng = mulberry32(hashString(`crowd:${opts.seed ?? 1}`));
+    this.load(walks, opts.busy);
+    this.density = crowdDensity(opts.hours ?? 12);
+    const cap = opts.cap ?? 400;
+    const looks = opts.looks ?? 1;
+    // City mode starts with no walks (they stream in with the chunks); walkers wait unplaced.
+    for (let id = 0; id < cap && (this.count || !walks.length); id++) {
+      const p: Walker = {
+        id, rank: this.rng(), speed: 0.9 + 0.6 * this.rng(), lat: (this.rng() - 0.5) * 0.6,
+        look: Math.floor(this.rng() * looks), active: false, walk: -1, s: 0,
+        dir: this.rng() < 0.5 ? 1 : -1, seg: 0, pause: this.rng() < 0.3 ? this.rng() * 6 : 0, x: 0, y: 0, hx: 1, hy: 0,
+      };
+      this.walkers.push(p);
+      if (this.count) this.place(p, this.pickWeighted());
+      p.active = p.walk >= 0 && p.rank < this.density;
+    }
+  }
+
+  private pickWeighted(): number {
+    let total = 0;
+    for (let w = 0; w < this.count; w++) total += this.length[w] * this.weight[w];
+    // pick a walk weighted by length (bazaar fronts count more)
+    let r = this.rng() * total;
+    let w = 0;
+    while (w < this.count - 1 && r > this.length[w] * this.weight[w]) r -= this.length[w] * this.weight[w++];
+    return w;
+  }
+
+  private place(p: Walker, w: number): void {
+    p.walk = w;
+    p.s = this.rng() * this.length[w];
+    p.seg = 0;
+    this.locate(p);
+  }
+
+  /**
+   * City streaming: replace the walk set (the walks of the loaded chunks). Walkers on a walk
+   * that is still there (same key) carry on; the rest are placed again near the view.
+   */
+  setWalks(walks: number[][], busy: number[], keys: string[]): void {
+    const old = this.walkers.map((p) => (p.walk >= 0 ? this.keys[p.walk] : undefined));
+    this.load(walks, busy, keys);
+    const idx = new Map(this.keys.map((k, i) => [k, i]));
+    if (this.region) this.setRegion(this.region, false);
+    this.walkers.forEach((p, i) => {
+      const w = old[i] !== undefined ? idx.get(old[i]!) : undefined;
+      if (w !== undefined) {
+        p.walk = w;
+        p.s = Math.min(p.s, this.length[w]);
+        p.seg = 0;
+        this.locate(p);
+      } else if (!this.count) {
+        p.walk = -1;
+      } else if (this.region && this.regionWalks.length) {
+        this.relocate(p);
+      } else {
+        this.place(p, this.pickWeighted());
+      }
+      p.active = p.walk >= 0 && p.rank < this.density;
+    });
+  }
+
+  private load(walks: number[][], busy?: number[], keys?: string[]): void {
     const keep = walks.map((_, i) => i).filter((i) => walks[i].length >= 4);
     const ws = keep.map((i) => walks[i]);
-    this.weight = Float32Array.from(keep.map((i) => (opts.busy?.[i] ? BAZAAR_PULL : 1)));
+    this.keys = keep.map((i) => keys?.[i] ?? String(i));
+    this.weight = Float32Array.from(keep.map((i) => (busy?.[i] ? BAZAAR_PULL : 1)));
     this.count = ws.length;
     const nPts = ws.reduce((n, w) => n + w.length / 2, 0);
     this.xy = new Float32Array(nPts * 2);
@@ -116,33 +180,13 @@ export class Crowd {
         this.links.push(Int32Array.from(out));
       }
     }
-
-    this.density = crowdDensity(opts.hours ?? 12);
-    const cap = opts.cap ?? 400;
-    const looks = opts.looks ?? 1;
-    let total = 0;
-    for (let w = 0; w < this.count; w++) total += this.length[w] * this.weight[w];
-    for (let id = 0; id < cap && this.count; id++) {
-      // pick a walk weighted by length (bazaar fronts count more)
-      let r = this.rng() * total;
-      let w = 0;
-      while (w < this.count - 1 && r > this.length[w] * this.weight[w]) r -= this.length[w] * this.weight[w++];
-      const p: Walker = {
-        id, rank: this.rng(), speed: 0.9 + 0.6 * this.rng(), lat: (this.rng() - 0.5) * 0.6,
-        look: Math.floor(this.rng() * looks), active: false, walk: w, s: this.rng() * this.length[w],
-        dir: this.rng() < 0.5 ? 1 : -1, seg: 0, pause: this.rng() < 0.3 ? this.rng() * 6 : 0, x: 0, y: 0, hx: 1, hy: 0,
-      };
-      p.active = p.rank < this.density;
-      this.walkers.push(p);
-      this.locate(p);
-    }
   }
 
   private region: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private regionWalks: number[] = [];
 
   /** City streaming: people walk only near the view; anyone far outside is moved back in. */
-  setRegion(r: { x0: number; y0: number; x1: number; y1: number } | null): void {
+  setRegion(r: { x0: number; y0: number; x1: number; y1: number } | null, move = true): void {
     this.region = r;
     if (!r) return;
     const inside = (x: number, y: number) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
@@ -152,7 +196,7 @@ export class Crowd {
       const b = this.start[w + 1] - 1;
       if (inside((this.xy[2 * a] + this.xy[2 * b]) / 2, (this.xy[2 * a + 1] + this.xy[2 * b + 1]) / 2)) this.regionWalks.push(w);
     }
-    for (const p of this.walkers) if (!this.near(p)) this.relocate(p);
+    if (move) for (const p of this.walkers) if (p.walk >= 0 && !this.near(p)) this.relocate(p);
   }
 
   private near(p: Walker, pad = 30): boolean {
@@ -170,13 +214,13 @@ export class Crowd {
 
   setHours(h: number): void {
     this.density = crowdDensity(h);
-    for (const p of this.walkers) p.active = p.rank < this.density;
+    for (const p of this.walkers) p.active = p.walk >= 0 && p.rank < this.density;
   }
 
   step(dt: number): void {
     if (dt <= 0) return;
     for (const p of this.walkers) {
-      if (!p.active) continue;
+      if (!p.active || p.walk < 0) continue;
       if (p.pause > 0) {
         p.pause -= dt;
         continue;

@@ -625,7 +625,7 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings: list, to_loc
                         cid = len(lanes)
                         lanes.append({"pts": _bezier(p0, d0, p2, d2, uturn), "a": n, "b": n, "edge": -1, "cls": M["cls"],
                                       "w": min(L["w"], M["w"]), "ring": L["ring"] and M["ring"], "conn": True,
-                                      "yield": (not L["ring"]) and M["ring"], "next": [mi]})
+                                      "yield": (not L["ring"]) and M["ring"], "next": [mi], "u": uturn})
                         L["next"].append(cid)
 
     # 9. pedestrian walks: in front of street-facing building edges, along footways, and the Hawa Mahal front
@@ -668,8 +668,22 @@ def to_polys_lines(geom) -> list[LineString]:
     return []
 
 
-def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, clip, roads) -> None:
-    """Add walks from building fronts / footways, check lanes against roads and buildings, write JSON."""
+def _delta_dm(pts) -> list[int]:
+    """Polyline as integers: first point in decimetres, then decimetre steps (small numbers gzip well)."""
+    out, px, py = [], 0, 0
+    for x, y in pts:
+        qx, qy = round(x * 10), round(y * 10)
+        out += [qx - px, qy - py]
+        px, py = qx, qy
+    return out
+
+
+def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, clip, roads, compact: bool = False) -> None:
+    """Add walks from building fronts / footways, check lanes against roads and buildings, write JSON.
+
+    compact (city slices): format v2 = road lanes only, delta-encoded; junction connectors are
+    listed as targets and rebuilt in the app (src/actors/lanes.ts expandLanes, same Bezier).
+    Walks are not written here: they go into the chunk files (write_chunks)."""
     keep_walk = lg["keep_walk"]
     for f in out_feats:
         pr = f["properties"]
@@ -712,6 +726,34 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
     used = sorted({n for L in lanes for n in (L["a"], L["b"])})
     remap = {n: i for i, n in enumerate(used)}
     r1 = lambda v: round(v, 1)
+    if compact:
+        n_road = lg["n_road"]
+        road = []
+        for L in lanes[:n_road]:
+            conns = [lanes[c] for c in L["next"]]
+            e = {"p": _delta_dm(L["pts"]), "a": remap[L["a"]], "b": remap[L["b"]], "c": L["cls"], "w": L["w"],
+                 "n": [C["next"][0] for C in conns]}
+            u = [i for i, C in enumerate(conns) if C.get("u")]
+            if u:
+                e["u"] = u
+            if L["ring"]:
+                e["r"] = 1
+            road.append(e)
+        out = {
+            "v": 2, "slice": sl,
+            "note": "Lane graph v2 (build_slice.py): road lanes only. p = delta decimetres (first point absolute), "
+                    "n = road lanes reachable through a junction (connector curves are rebuilt in the app), "
+                    "u = indices into n that are U-turns, r = Badi Chaupar ring. Walks live in the chunk files.",
+            "ring": {"c": [r1(lg["ring"][0][0]), r1(lg["ring"][0][1])], "r": r1(lg["ring"][1])},
+            "nodes": [[r1(nodes[n][0]), r1(nodes[n][1]), 1 if n in lg["boundary"] else 0] for n in used],
+            "lanes": road,
+        }
+        path = ROOT / "data/build" / sl / "lanes.json"
+        path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+        print(f"Lanes (compact): {n_road} road lanes, {len(lanes) - n_road} connectors rebuilt in the app; "
+              f"{len(lg['walks'])} walks to chunks; {off_road}/{total} lane samples off the road surface, "
+              f"{in_bld} inside buildings; {path.stat().st_size // 1024} KB")
+        return
     out = {
         "slice": sl,
         "note": "Lane graph for left-hand traffic (build_slice.py). Lane: p=flat [x,y,...] polyline (local metres), "
@@ -904,16 +946,19 @@ def main() -> None:
             json.dumps({"type": "FeatureCollection", "properties": meta, "features": out_feats}, separators=(",", ":")), encoding="utf-8")
         (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
         (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
-    else:
-        write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, osm_names(centerlines))
 
     # Lane graph + pedestrian walks for the traffic system (p2-traffic).
     t0 = time.time()
+    if chunked:
+        (ROOT / "data/build" / sl).mkdir(parents=True, exist_ok=True)
     raw_osm = json.loads((ROOT / "data/raw" / f"{sl}.osm.json").read_text(encoding="utf-8"))
     bld_polys = [shape(f["geometry"]) for f in bld_feats] + to_polys(reserved)
     lg = build_lanes(centerlines, raw_osm, clip, roads, bld_polys, to_local, landmark)
-    finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads)
+    finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads, compact=chunked)
     print(f"  lanes ({time.time() - t0:.1f}s)")
+    if chunked:
+        write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, osm_names(centerlines),
+                     walks=(lg["walks"], lg["busy"]))
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "
           f"{fronted} with street fronts")
     print(f"Hawa Mahal anchor {landmark['anchor']} facing {landmark['facingDeg']} deg on '{landmark['street']}'")
@@ -971,9 +1016,11 @@ def write_minimap(out_dir, clip, bld_feats, ground_feats) -> None:
     print(f"  minimap: {w}x{h} cells, {sum(len(o) for o in out) / 1000:.0f} KB")
 
 
-def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, names) -> None:
+def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, names, walks=([], [])) -> None:
     """City-scale output: data/build/<slice>/index.json + chunks/<cx>_<cy>.json (256 m grid).
-    Ground is clipped to chunk squares; buildings are assigned WHOLE by centroid (never split)."""
+    Ground is clipped to chunk squares; buildings are assigned WHOLE by centroid (never split).
+    Pedestrian walks go to the chunk holding their midpoint (properties.walks / .busy), so
+    people stream with the city instead of loading all at once."""
     out_dir = ROOT / "data/build" / sl
     cdir = out_dir / "chunks"
     if cdir.exists():
@@ -984,6 +1031,12 @@ def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark
     for f in bld_feats:
         c = shape(f["geometry"]).centroid
         chunks.setdefault(chunk_of(c.x, c.y), []).append(f)
+    walk_by: dict[tuple[int, int], tuple[list, list]] = {}
+    for w, b in zip(*walks):
+        mx, my = (w[0][0] + w[-1][0]) / 2, (w[0][1] + w[-1][1]) / 2
+        ws, bs = walk_by.setdefault(chunk_of(mx, my), ([], []))
+        ws.append([round(v, 1) for q in w for v in q])
+        bs.append(b)
     ground_geoms = [(f, shape(f["geometry"])) for f in ground_feats]
     gtree = shapely.STRtree([g for _, g in ground_geoms])
     minx, miny, maxx, maxy = clip.bounds
@@ -1007,10 +1060,12 @@ def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark
         k = kerb.intersection(box) if not kerb.is_empty else None
         if k is not None and not k.is_empty:
             feats.append({"type": "Feature", "geometry": mapping(rnd(k)), "properties": {"kind": "kerb", "id": f"kerbs/{cx}_{cy}"}})
-        if not feats:
+        cw, cb = walk_by.get((cx, cy), ([], []))
+        if not feats and not cw:
             continue
         cid = f"{cx}_{cy}"
-        text = json.dumps({"type": "FeatureCollection", "properties": {"chunk": cid}, "features": feats}, separators=(",", ":"))
+        props = {"chunk": cid, "walks": cw, "busy": cb} if cw else {"chunk": cid}
+        text = json.dumps({"type": "FeatureCollection", "properties": props, "features": feats}, separators=(",", ":"))
         (cdir / f"{cid}.json").write_text(text, encoding="utf-8")
         total += len(text)
         index.append({"id": cid, "cx": cx, "cy": cy, "buildings": len(chunks.get((cx, cy), [])), "bytes": len(text)})
