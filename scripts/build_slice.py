@@ -905,6 +905,43 @@ def osm_names(centerlines) -> list[dict]:
     return out
 
 
+MINI_CELL = 12.0  # m per minimap cell
+
+
+def write_minimap(out_dir, clip, bld_feats, ground_feats) -> None:
+    """A tiny raster of the city for the minimap: per 12 m cell 0 = outside, 1 = open ground,
+    2 = road, 3 = building; run-length encoded as "<count><char>" pairs (a few KB)."""
+    minx, miny, maxx, maxy = clip.bounds
+    w = int(math.ceil((maxx - minx) / MINI_CELL))
+    h = int(math.ceil((maxy - miny) / MINI_CELL))
+    xs = minx + (np.arange(w) + 0.5) * MINI_CELL
+    ys = maxy - (np.arange(h) + 0.5) * MINI_CELL  # row 0 = north
+    gx, gy = np.meshgrid(xs, ys)
+    pts = shapely.points(gx.ravel(), gy.ravel())
+    grid = np.zeros(w * h, dtype=np.uint8)
+    grid[shapely.contains_xy(shapely.prepared.prep(clip).context, gx.ravel(), gy.ravel())] = 1
+    for kind, val in (("road", 2), ("building", 3)):
+        geoms = [shape(f["geometry"]) for f in (bld_feats if kind == "building" else ground_feats) if f["properties"]["kind"] == kind]
+        if not geoms:
+            continue
+        tree = shapely.STRtree(geoms)
+        hit = tree.query(pts, predicate="intersects")
+        grid[np.unique(hit[0])] = val
+    chars = "".join("ORBX"[v] for v in grid)  # O outside, R... see below
+    out, i = [], 0
+    while i < len(chars):
+        j = i
+        while j < len(chars) and chars[j] == chars[i]:
+            j += 1
+        out.append(f"{j - i}{chars[i]}")
+        i = j
+    (out_dir / "minimap.json").write_text(json.dumps({
+        "x0": round(minx, 1), "y1": round(maxy, 1), "cell": MINI_CELL, "w": w, "h": h,
+        "legend": {"O": "outside", "R": "open ground", "B": "road", "X": "building"},
+        "rle": "".join(out)}, separators=(",", ":")), encoding="utf-8")
+    print(f"  minimap: {w}x{h} cells, {sum(len(o) for o in out) / 1000:.0f} KB")
+
+
 def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, names) -> None:
     """City-scale output: data/build/<slice>/index.json + chunks/<cx>_<cy>.json (256 m grid).
     Ground is clipped to chunk squares; buildings are assigned WHOLE by centroid (never split)."""
@@ -949,6 +986,7 @@ def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark
         total += len(text)
         index.append({"id": cid, "cx": cx, "cy": cy, "buildings": len(chunks.get((cx, cy), [])), "bytes": len(text)})
     (out_dir / "index.json").write_text(json.dumps({**meta, "chunkSize": CHUNK, "chunks": index, "names": names}, separators=(",", ":")), encoding="utf-8")
+    write_minimap(out_dir, clip, bld_feats, ground_feats)
     (out_dir / "places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
     (out_dir / "landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
     print(f"  chunks: {len(index)} files, {total / 1e6:.1f} MB raw, {sum(c['buildings'] for c in index)} buildings")

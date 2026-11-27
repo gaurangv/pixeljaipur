@@ -15,6 +15,7 @@ import { addLighting } from './sky/light';
 import { InfoCard } from './ui/infoCard';
 import { Pins } from './ui/pins';
 import { Search, type SearchEntry } from './ui/search';
+import { Minimap, type MinimapData } from './ui/minimap';
 import type { Place } from './ui/places';
 import { applyTheme } from './ui/theme';
 import { hashWriter, parseHash } from './ui/urlState';
@@ -77,6 +78,8 @@ for (const [path, url] of Object.entries(import.meta.glob('../data/build/walled/
   chunkUrls[path.slice(path.lastIndexOf('/') + 1, -5)] = url;
 }
 const cityMode = !!cityIndex && params.get('slice') !== 'slice1';
+const minimapData = Object.values(import.meta.glob('../data/build/walled/minimap.json', { import: 'default', eager: true }))[0] as MinimapData | undefined;
+let minimap: Minimap | null = null;
 
 const hawa = ((cityMode && cityLandmarks) || landmarks).landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
 const defaultView = (() => {
@@ -190,6 +193,17 @@ const saveView = () => {
   writeHash({ zoom: fixedMode ? state.zoom : state.level, x: state.target.x, y: -state.target.z, rot: state.rot, place: card.openId ?? undefined });
 };
 
+/** Ground points under the four screen corners (data coords), for the minimap footprint. */
+function viewCorners(): [number, number][] {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  return ([[0, 0], [w, 0], [w, h], [0, h]] as const).map(([sx, sy]) => {
+    const r = screenToRay(sx, sy, screenView());
+    const k = -r.origin.y / r.dir.y;
+    return [r.origin.x + r.dir.x * k, -(r.origin.z + r.dir.z * k)] as [number, number];
+  });
+}
+
 function screenView(): ScreenView {
   return { target: state.target, rot: state.rot, mpp: state.mpp, size: pixel.size, zoom: state.zoom, dpr: window.devicePixelRatio || 1 };
 }
@@ -229,6 +243,7 @@ function frame() {
   const snap = updateCamera(camera, state.target, state.rot, state.mpp, rt.x, rt.y);
   pixel.render(scene, camera, snap.remainderPx);
   pins.update(screenView());
+  if (minimap) minimap.update(viewCorners(), places.map((p) => p.anchor));
   window.__pjStats = {
     calls: renderer.info.render.calls,
     triangles: renderer.info.render.triangles,
@@ -489,6 +504,7 @@ async function start() {
       ...((cityMode && cityIndex?.names) || []).map((n) => ({ label: n.name, hint: 'Street', x: n.at[0], y: n.at[1] })),
     ];
     new Search(document.body, entries, (e) => (e.placeId ? openPlace(e.placeId) : flyTo(e.x, e.y, 600)));
+    if (cityMode && minimapData) minimap = new Minimap(document.body, minimapData, (x, y) => flyTo(x, y, 500));
   }
   if (initialPlace && placeById.has(initialPlace)) {
     // A shared link: open the card; only centre on the place if the link didn't set a view.

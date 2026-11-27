@@ -40,7 +40,8 @@
             26.9426
           ]
         },
-        "buffer_m": 60
+        "buffer_m": 60,
+        "chunked": true
       },
       "geometry": {
         "type": "Polygon",
