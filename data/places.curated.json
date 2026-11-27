@@ -67,7 +67,18 @@
     }
   ],
   "discover": {
-    "_comment": "Wikipedia geosearch inside the slice boundary adds other articles. Titles matching 'exclude' are skipped (not places, or not in the modelled area yet).",
-    "exclude": ["constituency", "district", "bombings", "Dhundhar", "^Jantar Mantar$"]
+    "_comment": "Wikipedia geosearch inside the slice boundary adds other articles. Titles matching 'exclude' are skipped (not places to visit, or outside the modelled area, e.g. Nahargarh Fort on the ridge = Phase 4).",
+    "exclude": [
+      "constituency",
+      "district",
+      "bombings",
+      "Dhundhar",
+      "^Jantar Mantar$",
+      "School",
+      "Foundation",
+      "Institute",
+      "Hotel",
+      "Nahargarh"
+    ]
   }
 }

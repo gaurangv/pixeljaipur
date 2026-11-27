@@ -11,7 +11,9 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 | `npm run shots` | Headless screenshots to `tests/shots/` for every scale and rotation, plus a phone shot. Logs draw calls; fails over 150. Close-up: `-- --mpp 0.5 --rot 2 --q "zoom=6&x=25&y=147"` |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run size` | Gzipped bundle budget check (2 MB), after build |
-| `npm run data` | Full data pipeline (below) |
+| `npm run data` | Full data pipeline for the original slice (below) |
+| `npm run data:city` | Whole walled city: tiled fetches (~15 min, resumable), then `build_slice.py --slice walled` writes `data/build/walled/` (index, 256 m chunks, lanes, places, minimap). Raw city downloads are git-ignored (25 MB+) |
+| `npm run travel` | Phase 3 check: pans Chandpol -> Sanganeri Gate, reports the longest wait for chunks and frame times |
 | `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.osm.geojson` |
 | `uv run scripts/fetch_overture.py [--refresh]` | Overture buildings to `data/raw/<slice>.overture.geojson` (cached) |
 | `uv run scripts/fetch_places.py [--refresh]` | Resolve Wikipedia titles / Wikidata ids for `data/places.curated.json`, geosearch other articles in the slice (cached in `data/raw/<slice>.places.json`) |
@@ -31,6 +33,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Data:** never hand-edit `data/raw/`. Regenerate `data/build/` with the script. Both are committed.
 - **Licences:** every asset gets a line in `public/assets/LICENSES.md`. The OSM and Overture attribution stays visible on the page.
 - **Info cards:** places live in `data/places.curated.json` (zone spec, Hindi name, fallback blurb). `build_slice.py` turns them into `data/build/<slice>.places.json` (zone polygons, anchor, height). Card text is fetched live from Wikipedia only when a card opens, never in `shot=1`. Remote text is set with `textContent` only. `?card=<id>` / `#z/x/y/rot/<id>` open a card.
+- **City streaming (Phase 3):** the app runs the whole walled city from `data/build/walled/` (`?slice=slice1` = old single slice). `src/world/chunks.ts` loads the 256 m chunks around the view (1 build per frame, unloads far ones). Builders' instanced batches go into city-wide `InstancePools` via `withPoolSink`, so draw calls don't grow with chunks: **never create a new geometry per call in a builder** (share module-level geometries), or every chunk opens new pools. Systems react to chunks via `System.onChunk`. The sun is on a rig that follows the view in 64 m steps.
 - **Building sources:** OSM first, then Overture where OSM is empty, then generated lots where both are empty. Every building has `source` and `front` (street-facing edge indices of its CCW ring).
 - **Workflow:** one phase per branch, small commit per task, plan mode before each phase. After any visual change, run `npm run shots` and look at the PNGs before calling it done.
 
