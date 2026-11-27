@@ -201,6 +201,50 @@ Pick one or two per phase as stretch goals. Each one teaches something new.
 | Voice tour | AI-narrated audio tours in English and Hindi | Text-to-speech, timing with camera paths | 4 |
 | Hidden chai cups | Collectible easter eggs tucked around the city, with a counter | Light game design | 4 |
 
+## Backlog
+
+Ideas to build later. Not scheduled yet; Phase 3 (the whole walled city) comes first.
+
+### AI-painted map mode
+
+**What.** A second, painterly view of the same city, in the style of Tiny Lyon and Petit Paris. You toggle between it and the live diorama. It does not replace the diorama (decision of 2026-11-26).
+
+**How it fits.**
+- Our renderer exports plain block renders per tile; it already draws the whole city.
+- An image model paints them. Pixel Trichy documents one pipeline: FLUX.2 [klein] 4B with the Apache-2.0 "Isometric Mumbai" LoRA, painting 512 px blocks inside 1024 px windows.
+- The paintings become a deep-zoom tile pyramid (AVIF), shown with OpenSeadragon or our own tile layer.
+- Pins, info cards, search and sound stay on top.
+
+**Needs.** Phase 3 whole-city data, a cloud GPU account (the laptop's AMD iGPU is too slow) and a budget.
+
+**Risks.** GPU cost, style consistency between tiles, and no live lighting or rotation in painted mode (the day cycle becomes a colour tint).
+
+**First step.** A spike: paint one 512 px tile around Hawa Mahal and compare it with the diorama.
+
+### Play mode: drive and fly
+
+**Drive.** Take an auto-rickshaw through the bazaars with WASD, the arrow keys or touch, and the camera follows.
+- It reuses the Phase 2 lane graph and collides with building footprints.
+- AI traffic gives way, and the horn plays through the sound system.
+- "Fares" or hidden chai-cup collectibles tie in with the idea menu.
+
+**Fly.** A pigeon, a kite or a drone low over the rooftops. Kites tie in with "Kite festival mode" on 14 January.
+
+**How it fits.**
+- A new `play` System plugged in through `src/core/systems.ts`.
+- It reuses `screenToRay` / `worldToScreen`, the traffic sim and the sound cues.
+- The camera stays orthographic and pixel-snapped, so play mode keeps the diorama look.
+
+**Needs.** Phase 3 chunk streaming, so you can drive across the whole city.
+
+**When.** Phase 4, or a stretch goal after Phase 3.
+
+### Backlog references
+
+- Tiny Lyon: https://tinylyon.com/#x=3791&y=630&z=0.456
+- Petit Paris: https://petitparis.app/
+- Pixel Trichy, how it was made: https://pixeltrichy.brightdesk.app/about.html
+
 ## Claude Code prompts, ready to paste
 
 Export this doc as Markdown into `docs/PLAN.md` first, so every prompt can point at it. Start each phase in plan mode and approve the plan before any code is written.
