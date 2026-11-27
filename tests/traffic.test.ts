@@ -118,7 +118,7 @@ describe('lane graph', () => {
 describe('traffic sim', () => {
   it('keeps vehicles on lanes, on the road, never overlapping in a lane', () => {
     const sim = new TrafficSim(graph, { seed: 3, hours: 18 });
-    expect(sim.vehicles.length).toBeLessThanOrEqual(80);
+    expect(sim.vehicles.length).toBeLessThanOrEqual(160);
     let checked = 0;
     for (let step = 0; step < 2400; step++) {
       sim.step(1 / 20);
@@ -212,7 +212,7 @@ describe('crowd', () => {
     const quiet = c.activeCount();
     c.setHours(19);
     expect(c.activeCount()).toBeGreaterThan(quiet * 5);
-    expect(c.walkers.length).toBeLessThanOrEqual(250);
+    expect(c.walkers.length).toBeLessThanOrEqual(400);
   });
 
   it('walks in front of buildings, never inside them', () => {

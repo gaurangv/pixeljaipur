@@ -118,7 +118,7 @@ export class Crowd {
     }
 
     this.density = crowdDensity(opts.hours ?? 12);
-    const cap = opts.cap ?? 250;
+    const cap = opts.cap ?? 400;
     const looks = opts.looks ?? 1;
     let total = 0;
     for (let w = 0; w < this.count; w++) total += this.length[w] * this.weight[w];

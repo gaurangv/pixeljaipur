@@ -134,6 +134,9 @@ export const palette = {
   hair: 0x2a2220,
   pigeon: 0x8d93a0,
   pigeonDark: 0x5d6270,
+  headlight: 0xfff1c2, // warm headlamp (unlit material: always this bright)
+  tailLight: 0xe0372c,
+  headBeam: 0x5c4a24, // ADDED to the road (additive), so keep it dim: a warm brightening, not a solid colour
 
   // --- end Actors (p2-traffic) ---
 

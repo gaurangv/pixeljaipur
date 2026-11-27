@@ -1,4 +1,4 @@
-import { Color, InstancedMesh } from 'three';
+import { AdditiveBlending, Color, InstancedMesh, MeshBasicMaterial, type Material } from 'three';
 import { toonInstanced } from '../render/materials';
 import { palette, type PaletteKey } from '../render/palette';
 import { unitBox } from '../world/instancing';
@@ -106,8 +106,8 @@ class Boxes {
   private readonly m: Float32Array;
   private readonly c = new Color();
 
-  constructor(name: string, readonly capacity: number) {
-    this.mesh = new InstancedMesh(unitBox, toonInstanced(), capacity);
+  constructor(name: string, readonly capacity: number, material: Material = toonInstanced()) {
+    this.mesh = new InstancedMesh(unitBox, material, capacity);
     this.mesh.name = name;
     this.mesh.castShadow = false; // the shadow map is static; moving things would smear it
     this.mesh.receiveShadow = true;
@@ -160,12 +160,48 @@ class Boxes {
 
 const PERSON_PARTS = 3;
 
+/** Lamps per vehicle: [along (forward = +1 front, -1 back), lat, height, colour]. Autos and scooters have one headlamp. */
+const LAMPS: Partial<Record<VehicleKind, [number, number, number, PaletteKey][]>> = {
+  auto: [[1, 0, 0.75, 'headlight'], [-1, 0.45, 0.6, 'tailLight'], [-1, -0.45, 0.6, 'tailLight']],
+  eRickshaw: [[1, 0, 0.8, 'headlight'], [-1, 0, 0.6, 'tailLight']],
+  scooter: [[1, 0, 0.8, 'headlight'], [-1, 0, 0.65, 'tailLight']],
+  bus: [[1, 0.8, 0.7, 'headlight'], [1, -0.8, 0.7, 'headlight'], [-1, 0.9, 0.9, 'tailLight'], [-1, -0.9, 0.9, 'tailLight']],
+  cycleRickshaw: [[1, 0, 0.7, 'headlight']],
+};
+const MAX_LAMPS = 4;
+/** Vehicles whose headlamp throws a visible pool on the road. */
+const BEAMS: Partial<Record<VehicleKind, number>> = { auto: 4.5, eRickshaw: 4, scooter: 4, bus: 7 };
+
+function unlit(): MeshBasicMaterial {
+  return new MeshBasicMaterial({ color: new Color(1, 1, 1) });
+}
+
+/** Light on the road: added to what's underneath, so it brightens the asphalt instead of covering it. */
+function glow(): MeshBasicMaterial {
+  return new MeshBasicMaterial({ color: new Color(1, 1, 1), blending: AdditiveBlending, transparent: true, depthWrite: false });
+}
+
 export class ActorMeshes {
   readonly vehicles: Boxes;
   readonly people: Boxes;
   readonly birds: Boxes;
+  /** Unlit headlamps / tail lights and translucent beams; shown only at night. */
+  readonly lamps: Boxes;
+  readonly beams: Boxes;
+  private lightsOn = false;
 
   constructor(readonly sim: TrafficSim, readonly crowd: Crowd, readonly flock: Flock | null) {
+    this.lamps = new Boxes('actors:lamps', sim.vehicles.length * MAX_LAMPS, unlit());
+    this.lamps.mesh.receiveShadow = false;
+    this.beams = new Boxes('actors:beams', sim.vehicles.length, glow());
+    this.beams.mesh.receiveShadow = false;
+    this.beams.mesh.renderOrder = 1;
+    for (const v of sim.vehicles) {
+      (LAMPS[v.kind] ?? []).forEach((l, k) => this.lamps.colour(v.id * MAX_LAMPS + k, l[3]));
+      this.beams.colour(v.id, 'headBeam');
+    }
+    this.lamps.commitColours();
+    this.beams.commitColours();
     this.vehicles = new Boxes('actors:vehicles', sim.vehicles.length * MAX_PARTS);
     this.people = new Boxes('actors:people', crowd.walkers.length * PERSON_PARTS);
     this.birds = new Boxes('actors:pigeons', Math.max(1, (flock?.birds.length ?? 0) * 2));
@@ -195,7 +231,14 @@ export class ActorMeshes {
   }
 
   get meshes(): InstancedMesh[] {
-    return [this.vehicles.mesh, this.people.mesh, this.birds.mesh];
+    return [this.vehicles.mesh, this.people.mesh, this.birds.mesh, this.lamps.mesh, this.beams.mesh];
+  }
+
+  /** Headlights on/off (night). Hidden meshes cost no draw calls. */
+  setLights(on: boolean): void {
+    this.lightsOn = on;
+    this.lamps.mesh.visible = on;
+    this.beams.mesh.visible = on;
   }
 
   update(): void {
@@ -214,6 +257,35 @@ export class ActorMeshes {
       }
     }
     V.commit();
+
+    if (this.lightsOn) {
+      const L = this.lamps;
+      const Bm = this.beams;
+      for (const v of this.sim.vehicles) {
+        const lamps = LAMPS[v.kind] ?? [];
+        const base = v.id * MAX_LAMPS;
+        const half = v.spec.len / 2;
+        for (let k = 0; k < MAX_LAMPS; k++) {
+          if (!v.active || k >= lamps.length) {
+            L.hide(base + k);
+            continue;
+          }
+          const [dir, lat, y0] = lamps[k];
+          const along = dir * (half + 0.04);
+          // Exaggerated (pixel art): a 12 cm lamp would be under one texel at 0.33 m/px.
+          L.set(base + k, v.x + v.hx * along - v.hy * lat, v.y + v.hy * along + v.hx * lat, y0, v.hx, v.hy, 0.35, 0.35, 0.5);
+        }
+        const reach = BEAMS[v.kind];
+        if (!v.active || !reach) {
+          Bm.hide(v.id);
+          continue;
+        }
+        const c = half + reach / 2;
+        Bm.set(v.id, v.x + v.hx * c, v.y + v.hy * c, 0.12, v.hx, v.hy, reach, 0.02, Math.max(1.4, v.spec.width * 1.5));
+      }
+      L.commit();
+      Bm.commit();
+    }
 
     const P = this.people;
     for (const p of this.crowd.walkers) {

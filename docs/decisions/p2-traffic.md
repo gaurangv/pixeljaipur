@@ -13,3 +13,4 @@ One line per decision, newest last. Folded into docs/DECISIONS.md when the branc
 | 2026-11-26 | Pedestrian walks are precomputed in Python: 0.9 m out from every street-facing building edge, along OSM footways, and in front of the Hawa Mahal plinth; anything within 0.45 m of a footprint is cut away. |
 | 2026-11-26 | Rendering: 3 InstancedMeshes of the shared unit box (vehicles+cows, people, pigeons) with per-instance palette colours set once and matrices written straight into the instance buffer. No shadow casting (the shadow map is static). +3 draw calls. |
 | 2026-11-26 | Shot mode: 900 fixed steps of 1/30 s from the seed at the frozen clock time; pigeons stay perched; `animating()` is false. Real mode moves agents with real dt (not game time), density follows `clock.now().hoursIST`. |
+| 2026-11-26 | Traffic doubled to 160 vehicles / 400 pedestrians; headlights (unlit lamps + additive road glow) on below 4 deg sun altitude |

@@ -34,15 +34,15 @@ export const KINDS: Record<VehicleKind, KindSpec> = {
   cow: { len: 1.9, width: 0.6, vmax: 0.6, accel: 0.3, maxClass: 1 },
 };
 
-/** The default fleet: 80 vehicles at most. */
+/** The default fleet: 160 vehicles at most (a Jaipur bazaar is busy). */
 export const FLEET: readonly [VehicleKind, number][] = [
-  ['bus', 1],
+  ['bus', 2],
   ['camelCart', 1],
-  ['cow', 5],
-  ['auto', 26],
-  ['eRickshaw', 14],
-  ['cycleRickshaw', 8],
-  ['scooter', 25],
+  ['cow', 6],
+  ['auto', 50],
+  ['eRickshaw', 28],
+  ['cycleRickshaw', 14],
+  ['scooter', 59],
 ];
 
 /** Speed limit by lane class (main, residential, gali), connectors and the ring. */

@@ -8,6 +8,11 @@ import { LaneGraph, type LanesJson } from './lanes';
 import { Flock } from './pigeons';
 import { ActorMeshes, OUTFITS } from './render';
 import { TrafficSim } from './sim';
+import { effectiveAltitude, sunPosition } from '../sky/sunModel';
+
+/** Headlights on when the sun is below this altitude (dusk to dawn). */
+export const HEADLIGHT_ALT_DEG = 4;
+const headlightsAt = (date: Date) => effectiveAltitude(sunPosition(date)) < HEADLIGHT_ALT_DEG;
 
 /*
  * The `traffic` System (Phase 2, stream B): moving vehicles, cows, pedestrians and the
@@ -44,6 +49,7 @@ export function createTraffic(): System {
       const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
       flock = hawa ? new Flock(hawa, { seed: ctx.seed }) : null;
       meshes = new ActorMeshes(sim, crowd, flock);
+      meshes.setLights(headlightsAt(ctx.clock.now().date));
       for (const m of meshes.meshes) group.add(m);
       ctx.scene.add(group);
 
@@ -68,6 +74,7 @@ export function createTraffic(): System {
       if (Math.abs(h - lastHour) > 1 / 60) {
         sim.setHours(h);
         crowd.setHours(h);
+        meshes.setLights(headlightsAt(now.date));
         lastHour = h;
       }
       sim.step(dt, (x, y, kind) => ctx.events.emit('horn', { x, y, kind }));
