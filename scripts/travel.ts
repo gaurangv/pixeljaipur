@@ -2,6 +2,7 @@
  * Phase 3 "done when": travel from Chandpol to Sanganeri Gate without a loading pause.
  *   npm run travel             (headless Chrome, SwiftShader: slower than a real GPU)
  *   npm run travel -- --secs 20 --level 3
+ *   npm run travel -- --gpu    (try the real GPU instead of SwiftShader)
  *
  * Pans the camera along the route by updating the URL hash, samples the chunk streamer
  * (window.__pjCity) and frame times, and reports the longest stretch during which chunks
@@ -25,7 +26,7 @@ const server = await createServer({ server: { port: 5178, strictPort: false }, l
 await server.listen();
 const base = server.resolvedUrls!.local[0];
 const browser = await (async () => {
-  const a = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  const a = args.includes('--gpu') ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
   try {
     return await chromium.launch({ channel: 'chrome', args: a });
   } catch {
@@ -38,17 +39,13 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${base}#${LEVEL}/${CHANDPOL[0]}/${CHANDPOL[1]}/0`);
   await page.waitForFunction(() => !!window.__pjCity && !window.__pjCity().busy, null, { timeout: 120_000 });
-  await page.evaluate(() => {
-    const w = window as unknown as { __frames: number[] };
-    w.__frames = [];
+  // A string, not a function: tsx would wrap named closures in a __name() helper the page lacks.
+  await page.evaluate(`(() => {
+    window.__frames = [];
     let last = performance.now();
-    const tick = (t: number) => {
-      w.__frames.push(t - last);
-      last = t;
-      requestAnimationFrame(tick);
-    };
+    const tick = (t) => { window.__frames.push(t - last); last = t; requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
-  });
+  })()`);
 
   const steps = SECS * 10;
   let gapStart = -1;
@@ -75,8 +72,17 @@ try {
   const frames = (await page.evaluate(() => (window as unknown as { __frames: number[] }).__frames)).slice(5).sort((a, b) => a - b);
   const pct = (p: number) => frames[Math.min(frames.length - 1, Math.floor(frames.length * p))]?.toFixed(1);
   const stats = await page.evaluate(() => window.__pjStats);
+  const st0 = await page.evaluate(() => window.__pjCity!());
   console.log(`route Chandpol -> Sanganeri Gate (${Math.round(Math.hypot(SANGANERI[0] - CHANDPOL[0], SANGANERI[1] - CHANDPOL[1]))} m) in ${SECS}s at level ${LEVEL}`);
   console.log(`longest wait for chunks in view: ${worstGap} ms (limit ${MAX_GAP}); max chunks loaded: ${maxLoaded}`);
+  const b = [...(st0.buildMs ?? [])].sort((x, y) => x - y);
+  if (b.length) console.log(`chunk builds: ${b.length}, ms median ${b[b.length >> 1].toFixed(0)}, max ${b[b.length - 1].toFixed(0)}`);
+  const renderer = await page.evaluate(() => {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    return ext ? String(gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
+  });
+  console.log(`renderer: ${renderer}`);
   console.log(`frame ms: median ${pct(0.5)}, p95 ${pct(0.95)}, max ${pct(0.999)}; last frame calls=${stats?.calls} tris=${stats?.triangles}`);
   if (errors.length) console.log('page errors:', errors);
   if (worstGap > MAX_GAP || errors.length) process.exitCode = 1;

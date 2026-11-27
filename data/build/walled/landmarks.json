@@ -1,0 +1,41 @@
+{
+  "landmarks": [
+    {
+      "id": "hawaMahal",
+      "name": "Hawa Mahal",
+      "source": "osm node/542886858 (position only)",
+      "anchor": [
+        25.26,
+        147.09
+      ],
+      "facingDeg": -14.1,
+      "width": 50.0,
+      "depth": 24.0,
+      "street": "Amer Road",
+      "reserved": [
+        [
+          [
+            19.17,
+            122.84
+          ],
+          [
+            31.36,
+            171.34
+          ],
+          [
+            8.08,
+            177.19
+          ],
+          [
+            -4.1,
+            128.69
+          ],
+          [
+            19.17,
+            122.84
+          ]
+        ]
+      ]
+    }
+  ]
+}

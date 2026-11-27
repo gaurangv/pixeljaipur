@@ -10,10 +10,10 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 | `npm test` | Vitest (pure logic in `tests/*.test.ts`) |
 | `npm run shots` | Headless screenshots to `tests/shots/` for every scale and rotation, plus a phone shot. Logs draw calls; fails over 150. Close-up: `-- --mpp 0.5 --rot 2 --q "zoom=6&x=25&y=147"` |
 | `npm run build` | Typecheck + production build to `dist/` |
-| `npm run size` | Gzipped bundle budget check (2 MB), after build |
+| `npm run size` | Gzipped initial-download budget (2 MB), after build; streamed city chunks are reported separately |
 | `npm run data` | Full data pipeline for the original slice (below) |
 | `npm run data:city` | Whole walled city: tiled fetches (~15 min, resumable), then `build_slice.py --slice walled` writes `data/build/walled/` (index, 256 m chunks, lanes, places, minimap). Raw city downloads are git-ignored (25 MB+) |
-| `npm run travel` | Phase 3 check: pans Chandpol -> Sanganeri Gate, reports the longest wait for chunks and frame times |
+| `npm run travel -- --gpu` | Phase 3 check: pans Chandpol -> Sanganeri Gate on the real GPU, reports the longest wait for chunks, chunk build ms and frame times (without `--gpu` it uses SwiftShader, ~2 s/frame, and fails the gap limit) |
 | `uv run scripts/fetch_osm.py [--slice slice1] [--refresh]` | OSM to `data/raw` (cached) to `data/build/<slice>.osm.geojson` |
 | `uv run scripts/fetch_overture.py [--refresh]` | Overture buildings to `data/raw/<slice>.overture.geojson` (cached) |
 | `uv run scripts/fetch_places.py [--refresh]` | Resolve Wikipedia titles / Wikidata ids for `data/places.curated.json`, geosearch other articles in the slice (cached in `data/raw/<slice>.places.json`) |

@@ -119,7 +119,7 @@ declare global {
   interface Window {
     __pjReady?: boolean;
     /** City mode: streamed chunk status (scripts/travel.ts reads it). */
-    __pjCity?: () => { loaded: number; busy: boolean };
+    __pjCity?: () => { loaded: number; busy: boolean; buildMs: number[] };
     /** Render stats for the last frame (scripts/shots.ts reads these). */
     __pjStats?: { calls: number; triangles: number; ms: number; geometries: number };
   }
@@ -426,32 +426,43 @@ window.addEventListener('hashchange', () => {
 });
 
 /** Whole-city mode: diorama base + streamed chunks (instanced details go into shared pools). */
+/** Chunk build times (ms), for npm run travel. */
+const buildMs: number[] = [];
+
 async function startCity(index: CityIndex) {
   scene.add(buildBase(index.boundary, soil));
   panBounds = bounds(index.boundary);
   clampTarget(state.target);
   const pools = new InstancePools();
   scene.add(pools.group);
+  const buildChunk = (id: string, data: FootprintCollection) => {
+    return withPoolSink(
+      (batches) => pools.add(id, batches),
+      () => {
+        const g = new Group();
+        g.name = `chunk:${id}`;
+        g.add(buildFootprints(data, { skip: ['building'], mpp: state.mpp }));
+        const houses = buildShopHouses(data, seed);
+        g.add(houses.group);
+        g.add(buildRoofs(houses.specs, seed));
+        g.add(buildTrees(placeTrees(data, seed), seed));
+        g.add(buildDressing(houses.specs, data, seed));
+        scene.add(g);
+        return { group: g, specs: houses.specs, data };
+      },
+    );
+  };
   chunks = new ChunkManager({
     index,
     urlFor: (id) => chunkUrls[id],
     build: (id, data) => {
       data.properties = { ...(data.properties ?? {}), boundary: index.boundary };
-      return withPoolSink(
-        (batches) => pools.add(id, batches),
-        () => {
-          const g = new Group();
-          g.name = `chunk:${id}`;
-          g.add(buildFootprints(data, { skip: ['building'], mpp: state.mpp }));
-          const houses = buildShopHouses(data, seed);
-          g.add(houses.group);
-          g.add(buildRoofs(houses.specs, seed));
-          g.add(buildTrees(placeTrees(data, seed), seed));
-          g.add(buildDressing(houses.specs, data, seed));
-          scene.add(g);
-          return { group: g, specs: houses.specs, data };
-        },
-      );
+      const t0 = performance.now();
+      try {
+        return buildChunk(id, data);
+      } finally {
+        buildMs.push(performance.now() - t0);
+      }
     },
     dispose: (id, built) => {
       scene.remove(built.group);
@@ -497,7 +508,7 @@ async function start() {
   } catch (err) {
     if (err !== 'city') console.error('[pixeljaipur] slice failed to load', err);
   }
-  window.__pjCity = cityMode ? () => ({ loaded: chunks?.loadedIds.length ?? 0, busy: chunks?.busy ?? false }) : undefined;
+  window.__pjCity = cityMode ? () => ({ loaded: chunks?.loadedIds.length ?? 0, busy: chunks?.busy ?? false, buildMs }) : undefined;
   if (!shotMode) {
     const entries: SearchEntry[] = [
       ...places.map((p) => ({ label: p.name, hint: p.nameHi ?? undefined, x: p.anchor[0], y: p.anchor[1], placeId: p.id })),

@@ -251,7 +251,7 @@ describe('pigeons', () => {
     events.on('pigeonsBurst', (p) => bursts.push(p));
     const sys = createTraffic();
     const ctx = {
-      scene: new Scene(), clock: new Clock(parseIST('2026-01-14T18:00')!), events, seed: 1, shot: false,
+      scene: new Scene(), clock: new Clock(parseIST('2026-01-14T18:00')!), events, seed: 1, shot: false, params: new URLSearchParams('slice=slice1'),
     } as unknown as WorldContext;
     await sys.init(ctx);
     expect(sys.animating()).toBe(true);
@@ -266,7 +266,7 @@ describe('pigeons', () => {
     const make = async () => {
       const sys = createTraffic();
       const scene = new Scene();
-      const ctx = { scene, clock: new Clock(parseIST('2026-01-14T07:00')!), events: new EventBus(), seed: 1, shot: true } as unknown as WorldContext;
+      const ctx = { scene, clock: new Clock(parseIST('2026-01-14T07:00')!), events: new EventBus(), seed: 1, shot: true, params: new URLSearchParams('slice=slice1') } as unknown as WorldContext;
       await sys.init(ctx);
       sys.update(0, ctx.clock.now(), ctx);
       expect(sys.animating()).toBe(false);
