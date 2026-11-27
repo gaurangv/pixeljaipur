@@ -46,6 +46,12 @@ function onRoof(spec: ShopHouseSpec, [x, y]: Pt, margin = 0): boolean {
   return pts.every(([px, py]) => pointInRing(px, py, spec.rings[0]) && !spec.rings.slice(1).some((h) => pointInRing(px, py, h)));
 }
 
+/** Shared geometry (one instance pool per geometry when streaming chunks). */
+const tankGeo = new CylinderGeometry(0.5, 0.5, 1, 8);
+
+/** Shared geometry (one instance pool per geometry when streaming chunks). */
+const dishGeo = new CylinderGeometry(0.5, 0.12, 0.18, 8);
+
 export function describeRoof(spec: ShopHouseSpec, worldSeed = 1): RoofSpec {
   const rng = rngFor(`roof:${spec.id}`, worldSeed);
   const ring = spec.rings[0];
@@ -112,8 +118,6 @@ function oriented(at: Pt, y: number, axis: Pt, sx: number, sy: number, sz: numbe
 }
 
 export function buildRoofs(specs: ShopHouseSpec[], worldSeed = 1): Group {
-  const tankGeo = new CylinderGeometry(0.5, 0.5, 1, 8);
-  const dishGeo = new CylinderGeometry(0.5, 0.12, 0.18, 8);
   const shade = new Map<PaletteKey, Batch>(); // parapets + mumtys match their building
   const byShade = (k: PaletteKey) => {
     let b = shade.get(k);

@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","properties":{"chunk":"-3_8"},"features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[-512.0,2278.33],[-512.0,2048.0],[-768.0,2048.0],[-768.0,2087.04],[-512.0,2278.33]]]},"properties":{"kind":"green","id":"way/91603112","source":"osm"}}]}

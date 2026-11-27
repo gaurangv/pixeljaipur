@@ -13,6 +13,78 @@ export interface LanesJson {
   busy?: number[];
 }
 
+/**
+ * Compact city format (v2, build_slice.py for chunked slices): road lanes only, points as
+ * decimetre deltas; `n` lists the road lanes reachable through each junction, `u` which of
+ * those are U-turns. The connector curves are rebuilt here with the build script's Bezier.
+ */
+export interface LanesJsonV2 {
+  v: 2;
+  ring: { c: [number, number]; r: number };
+  nodes: [number, number, number][];
+  lanes: { p: number[]; n: number[]; u?: number[]; a: number; b: number; c: number; w: number; r?: number }[];
+}
+
+/** Same curve as `_bezier` in scripts/build_slice.py. Returns flat [x, y, ...]. */
+export function connectorCurve(
+  p0: [number, number], d0: [number, number], p2: [number, number], d2: [number, number], uturn: boolean,
+): number[] {
+  const dist = Math.hypot(p2[0] - p0[0], p2[1] - p0[1]);
+  const k = (uturn ? 1.3 : 0.4) * Math.max(dist, 0.5);
+  const c1 = [p0[0] + d0[0] * k, p0[1] + d0[1] * k];
+  const c2 = [p2[0] - d2[0] * k, p2[1] - d2[1] * k];
+  const n = Math.max(2, Math.min(10, Math.ceil((dist * (uturn ? 2 : 1)) / 1.5)));
+  const out: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const u = 1 - t;
+    for (const a of [0, 1]) {
+      out.push(Math.round((u ** 3 * p0[a] + 3 * u * u * t * c1[a] + 3 * u * t * t * c2[a] + t ** 3 * p2[a]) * 10) / 10);
+    }
+  }
+  return out;
+}
+
+const unit = (ax: number, ay: number, bx: number, by: number): [number, number] => {
+  const d = Math.hypot(bx - ax, by - ay) || 1;
+  return [(bx - ax) / d, (by - ay) / d];
+};
+
+/** Expand the compact v2 file into the full lane list (road lanes keep their ids; connectors follow). */
+export function expandLanes(d: LanesJsonV2): LanesJson {
+  const lanes: LanesJson['lanes'] = d.lanes.map((l) => {
+    const p: number[] = [];
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < l.p.length; i += 2) {
+      x += l.p[i];
+      y += l.p[i + 1];
+      p.push(x / 10, y / 10);
+    }
+    return { p, n: [], a: l.a, b: l.b, c: l.c, w: l.w, ...(l.r ? { r: 1 } : {}) };
+  });
+  const nRoad = lanes.length;
+  for (let li = 0; li < nRoad; li++) {
+    const L = lanes[li];
+    const src = d.lanes[li];
+    const k = L.p.length;
+    const p0: [number, number] = [L.p[k - 2], L.p[k - 1]];
+    const d0 = unit(L.p[k - 4], L.p[k - 3], p0[0], p0[1]);
+    src.n.forEach((mi, i) => {
+      const M = lanes[mi];
+      const p2: [number, number] = [M.p[0], M.p[1]];
+      const d2 = unit(p2[0], p2[1], M.p[2], M.p[3]);
+      const ring = !!L.r && !!M.r;
+      L.n.push(lanes.length);
+      lanes.push({
+        p: connectorCurve(p0, d0, p2, d2, !!src.u?.includes(i)), n: [mi], a: L.b, b: L.b, c: M.c, w: Math.min(L.w, M.w), j: 1,
+        ...(ring ? { r: 1 } : {}), ...(!L.r && M.r ? { y: 1 } : {}),
+      });
+    });
+  }
+  return { ring: d.ring, nodes: d.nodes, lanes, walks: [] };
+}
+
 /** Lane class: 0 main bazaar road, 1 residential, 2 service lane / gali. */
 export type LaneClass = 0 | 1 | 2;
 
@@ -54,7 +126,8 @@ export class LaneGraph {
   private readonly gh: number;
   private readonly grid: Int32Array[];
 
-  constructor(data: LanesJson) {
+  constructor(input: LanesJson | LanesJsonV2) {
+    const data = 'v' in input && input.v === 2 ? expandLanes(input) : (input as LanesJson);
     const L = data.lanes;
     this.count = L.length;
     const nPts = L.reduce((n, l) => n + l.p.length / 2, 0);

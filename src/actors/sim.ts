@@ -34,6 +34,16 @@ export const KINDS: Record<VehicleKind, KindSpec> = {
   cow: { len: 1.9, width: 0.6, vmax: 0.6, accel: 0.3, maxClass: 1 },
 };
 
+/** Axis-aligned area (data coords, metres). */
+export interface Region {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+export const inRegion = (r: Region, x: number, y: number, pad = 0) =>
+  x >= r.x0 - pad && x <= r.x1 + pad && y >= r.y0 - pad && y <= r.y1 + pad;
+
 /** The default fleet: 160 vehicles at most (a Jaipur bazaar is busy). */
 export const FLEET: readonly [VehicleKind, number][] = [
   ['bus', 2],
@@ -182,11 +192,36 @@ export class TrafficSim {
     return this.g.cls[lane] <= v.spec.maxClass;
   }
 
+  /** Scatter the active share of the fleet (city mode: after setRegion, so they start near the view). */
+  scatter(): void {
+    for (const v of this.vehicles) if (!v.active && v.rank < this.density) this.place(v);
+  }
+
   /** Put a vehicle somewhere free on a random road lane (initial scatter). */
+  /**
+   * City streaming: only simulate around the view. Vehicles appear on lanes inside `r`,
+   * and ones that drive more than 40 m out of it are recycled back inside.
+   */
+  setRegion(r: Region | null): void {
+    this.region = r;
+    if (!r) return;
+    const g = this.g;
+    this.regionLanes = this.roadLanes.filter((l) => {
+      const a = g.start[l];
+      const b = g.start[l + 1] - 1;
+      return inRegion(r, (g.xy[2 * a] + g.xy[2 * b]) / 2, (g.xy[2 * a + 1] + g.xy[2 * b + 1]) / 2);
+    });
+  }
+
+  private region: Region | null = null;
+  private regionLanes: number[] = [];
+
   private place(v: Vehicle): boolean {
     const g = this.g;
+    const pool = this.region ? this.regionLanes : this.roadLanes;
+    if (!pool.length) return false;
     for (let t = 0; t < 40; t++) {
-      const lane = this.roadLanes[Math.floor(this.rng() * this.roadLanes.length)];
+      const lane = pool[Math.floor(this.rng() * pool.length)];
       if (!this.allowed(v, lane) || g.length[lane] < v.spec.len + 2) continue;
       // longer lanes and the bazaars are likelier
       if (this.rng() * 60 > g.length[lane] * CLASS_PULL[g.cls[lane]]) continue;
@@ -396,6 +431,11 @@ export class TrafficSim {
         if (v.spawnCd <= 0 && v.rank < this.density) this.spawn(v);
         continue;
       }
+      if (this.region && !inRegion(this.region, v.x, v.y, 40)) {
+        this.leave(v); // drove out of the streamed area: recycle near the view
+        v.spawnCd = 0.3 + this.rng();
+        continue;
+      }
       v.hornCd -= dt;
       // cows: stroll, then stand in the road for a while
       if (v.kind === 'cow') {
@@ -490,6 +530,10 @@ export class TrafficSim {
   }
 
   private spawn(v: Vehicle): void {
+    if (this.region) {
+      if (!this.place(v)) v.spawnCd = 0.5 + this.rng();
+      return;
+    }
     const src = this.g.sources;
     if (!src.length) return;
     for (let t = 0; t < 4; t++) {

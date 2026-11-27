@@ -39,6 +39,10 @@ export class Batch {
  * e.g. awnings in 5 colours + signboards + carts (all unit boxes) -> 1 draw call.
  */
 export function buildPooled(batches: Batch[], name = 'pooled'): InstancedMesh[] {
+  if (sink) {
+    sink(batches);
+    return [];
+  }
   const groups = new Map<string, Batch[]>();
   for (const b of batches) {
     if (!b.matrices.length) continue;
@@ -74,6 +78,22 @@ export function buildPooled(batches: Batch[], name = 'pooled'): InstancedMesh[] 
     out.push(mesh);
   }
   return out;
+}
+
+let sink: ((batches: Batch[]) => void) | null = null;
+
+/**
+ * Run `build` with every buildPooled() call redirected into `into` (the chunk streamer's
+ * global InstancePools), so builders written for one scene work unchanged per chunk.
+ */
+export function withPoolSink<T>(into: (batches: Batch[]) => void, build: () => T): T {
+  const prev = sink;
+  sink = into;
+  try {
+    return build();
+  } finally {
+    sink = prev;
+  }
 }
 
 /** Axis-aligned transform: centre (x, y, z), size (sx, sy, sz). */

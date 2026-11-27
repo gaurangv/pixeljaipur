@@ -26,6 +26,8 @@ import argparse
 import json
 import math
 import random
+import sys
+import time
 import re
 from pathlib import Path
 
@@ -35,6 +37,10 @@ from pyproj import Transformer
 from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
 from shapely.ops import nearest_points, split, unary_union
+import shapely.prepared
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sliceconf import boundary_feature, load_boundary  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 ORIGIN_LAT, ORIGIN_LON = 26.9225798, 75.8267125  # Badi Chaupar, same as fetch_osm.py
@@ -58,6 +64,63 @@ HAWA_MAHAL = {"lon": 75.8268652, "lat": 26.923932}
 HAWA_WIDTH = 50.0  # facade length along the street (m). Tune against docs/refs/.
 HAWA_DEPTH = 24.0  # reserved depth behind the facade (m)
 HAWA_SETBACK = 3.0  # footpath + plinth between kerb and facade (m)
+
+
+class NearIndex:
+    """Spatial index answering .distance(point) against many geometries (replaces one giant union,
+    whose distance queries get slower with every road in the city)."""
+
+    def __init__(self, geoms, reach: float = 40.0):
+        self.g = [g for g in geoms if g is not None and not g.is_empty]
+        self.t = shapely.STRtree(self.g) if self.g else None
+        self.reach = reach
+
+    def distance(self, p) -> float:
+        if self.t is None:
+            return float("inf")
+        r = self.reach
+        idx = self.t.query(shapely.box(p.x - r, p.y - r, p.x + r, p.y + r))
+        return min((self.g[i].distance(p) for i in idx), default=float("inf"))
+
+    def near(self, geom, pad: float = 0.0) -> list:
+        if self.t is None:
+            return []
+        minx, miny, maxx, maxy = geom.bounds
+        return [self.g[i] for i in self.t.query(shapely.box(minx - pad, miny - pad, maxx + pad, maxy + pad))]
+
+
+class GridIndex:
+    """Grows as polygons are accepted (STRtree can't): cells of `cell` metres."""
+
+    def __init__(self, cell: float = 40.0):
+        self.cell = cell
+        self.cells: dict[tuple[int, int], list] = {}
+
+    def add(self, g) -> None:
+        minx, miny, maxx, maxy = g.bounds
+        c = self.cell
+        for i in range(int(minx // c), int(maxx // c) + 1):
+            for j in range(int(miny // c), int(maxy // c) + 1):
+                self.cells.setdefault((i, j), []).append(g)
+
+    def near(self, geom, pad: float = 0.0) -> list:
+        minx, miny, maxx, maxy = geom.bounds
+        c = self.cell
+        out, seen = [], set()
+        for i in range(int((minx - pad) // c), int((maxx + pad) // c) + 1):
+            for j in range(int((miny - pad) // c), int((maxy + pad) // c) + 1):
+                for g in self.cells.get((i, j), ()):
+                    if id(g) not in seen:
+                        seen.add(id(g))
+                        out.append(g)
+        return out
+
+
+CHUNK = 256.0  # m, runtime streaming grid (src/world/chunks.ts must match)
+
+
+def chunk_of(x: float, y: float) -> tuple[int, int]:
+    return int(math.floor(x / CHUNK)), int(math.floor(y / CHUNK))
 
 
 def to_polys(geom) -> list[Polygon]:
@@ -312,7 +375,10 @@ def _unit(ax, ay, bx, by):
     return dx / n, dy / n
 
 
-def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, landmark) -> dict:
+def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings: list, to_local, landmark) -> dict:
+    """`buildings`: building polygons (plus reserved landmark plots). Queried through STRtrees,
+    never unioned: a union of the whole city's ~30k footprints exhausts memory."""
+    tl = time.time()
     tags = {f"way/{el['id']}": el.get("tags", {}) for el in raw_osm.get("elements", []) if el["type"] == "way"}
 
     def oneway_of(wid: str) -> int:
@@ -347,13 +413,16 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
         return c
 
     cnt = counts()
+    part_tree = shapely.STRtree([LineString(pt["cs"]) for pt in parts])  # ends move < LANE_SNAP, so pad the query
     for pi, pt in enumerate(parts):
         for end in (0, -1):
             q = pt["cs"][end]
             if cnt[q] > 1 or clip.exterior.distance(Point(q)) < LANE_BOUNDARY:
                 continue
             best = None
-            for oi, other in enumerate(parts):
+            pad = 3 * LANE_SNAP
+            for oi in sorted(part_tree.query(shapely.box(q[0] - pad, q[1] - pad, q[0] + pad, q[1] + pad)).tolist()):
+                other = parts[oi]
                 if oi == pi:
                     continue
                 ol = LineString(other["cs"])
@@ -379,6 +448,8 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
                     acc += seg
             pt["cs"][end] = target
             cnt = counts()
+
+    print(f"    lanes: snapped ends ({time.time() - tl:.1f}s)", flush=True)
 
     # 3. split at nodes (shared vertices and ends) into undirected edges
     node_of: dict = {}
@@ -425,13 +496,19 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
 
     # 5. never drive through a building: drop edges whose lanes would cross one (mapped roads
     #    sometimes run under OSM / Overture footprints), then drop small disconnected fragments
-    solid = buildings.buffer(-0.1)
+    solid = [g for g in (b.buffer(-0.1) for b in buildings) if not g.is_empty]
+    solid_tree = shapely.STRtree(solid)
+
+    def solid_area(body) -> float:
+        # footprints don't overlap, so the summed overlaps equal the overlap with their union
+        return sum(body.intersection(solid[i]).area for i in solid_tree.query(body))
+
     blocked_edges = 0
     kept = []
     for e in edges:
         offs = [0.22 * e["w"], -0.22 * e["w"]] if e["ow"] else [e["w"] / 4, -e["w"] / 4]
         # a vehicle body (about 0.6 m either side of its lane) must not enter a footprint
-        if any(LineString(_offset_left(e["cs"], o)).buffer(0.6).intersection(solid).area > 0.3 for o in offs):
+        if any(solid_area(LineString(_offset_left(e["cs"], o)).buffer(0.6)) > 0.3 for o in offs):
             blocked_edges += 1
             continue
         kept.append(e)
@@ -451,6 +528,8 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
         total[cfind(e["a"])] = total.get(cfind(e["a"]), 0.0) + LineString(e["cs"]).length
     dropped = [e for e in edges if total[cfind(e["a"])] < LANE_MIN_NETWORK]
     edges = [e for e in edges if total[cfind(e["a"])] >= LANE_MIN_NETWORK]
+
+    print(f"    lanes: {len(edges)} edges, {blocked_edges} blocked ({time.time() - tl:.1f}s)", flush=True)
 
     # 6. the roundabout: one-way edges on the Badi Chaupar circle
     ring_pts = [q for e in edges if e["name"] == RING_NAME for q in e["cs"]]
@@ -546,17 +625,26 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
                         cid = len(lanes)
                         lanes.append({"pts": _bezier(p0, d0, p2, d2, uturn), "a": n, "b": n, "edge": -1, "cls": M["cls"],
                                       "w": min(L["w"], M["w"]), "ring": L["ring"] and M["ring"], "conn": True,
-                                      "yield": (not L["ring"]) and M["ring"], "next": [mi]})
+                                      "yield": (not L["ring"]) and M["ring"], "next": [mi], "u": uturn})
                         L["next"].append(cid)
 
     # 9. pedestrian walks: in front of street-facing building edges, along footways, and the Hawa Mahal front
-    bgrid = buildings.buffer(0.45)  # walkers sway up to 0.3 m off the line
+    print(f"    lanes: {len(lanes)} lanes ({time.time() - tl:.1f}s)", flush=True)
+    bgrid = [b.buffer(0.45) for b in buildings]  # walkers sway up to 0.3 m off the line
+    bgrid_tree = shapely.STRtree(bgrid)
+    walk_clip = shapely.prepared.prep(clip.buffer(-1.0))
+    walk_clip_g = clip.buffer(-1.0)
     walks: list[list[tuple[float, float]]] = []
     busy: list[int] = []  # 1 = a bazaar shop front (or the Hawa Mahal): busier with shoppers
 
     def keep_walk(cs, bazaar=False):
         line = LineString(cs)
-        for piece in to_polys_lines(line.difference(bgrid).intersection(clip.buffer(-1.0))):
+        near = bgrid_tree.query(line)
+        if len(near):
+            line = line.difference(unary_union([bgrid[i] for i in near]))
+        if not walk_clip.contains(line):
+            line = line.intersection(walk_clip_g)
+        for piece in to_polys_lines(line):
             if piece.length >= 2.0:
                 walks.append(list(piece.coords))
                 busy.append(1 if bazaar else 0)
@@ -580,8 +668,22 @@ def to_polys_lines(geom) -> list[LineString]:
     return []
 
 
-def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, clip, roads) -> None:
-    """Add walks from building fronts / footways, check lanes against roads and buildings, write JSON."""
+def _delta_dm(pts) -> list[int]:
+    """Polyline as integers: first point in decimetres, then decimetre steps (small numbers gzip well)."""
+    out, px, py = [], 0, 0
+    for x, y in pts:
+        qx, qy = round(x * 10), round(y * 10)
+        out += [qx - px, qy - py]
+        px, py = qx, qy
+    return out
+
+
+def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, clip, roads, compact: bool = False) -> None:
+    """Add walks from building fronts / footways, check lanes against roads and buildings, write JSON.
+
+    compact (city slices): format v2 = road lanes only, delta-encoded; junction connectors are
+    listed as targets and rebuilt in the app (src/actors/lanes.ts expandLanes, same Bezier).
+    Walks are not written here: they go into the chunk files (write_chunks)."""
     keep_walk = lg["keep_walk"]
     for f in out_feats:
         pr = f["properties"]
@@ -607,21 +709,51 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
         keep_walk([tuple(c) for c in to_local(np.array(coords))])
 
     # sanity: how much of every lane lies on the road surface / inside a building
-    bld = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"]).buffer(-0.2)
+    bld = [g for g in (shape(f["geometry"]).buffer(-0.2) for f in out_feats if f["properties"]["kind"] == "building") if not g.is_empty]
     road_area = roads.buffer(0.3)
-    off_road = in_bld = total = 0
+    shapely.prepare(road_area)
+    samples = []
     for L in lg["lanes"]:
         line = LineString(L["pts"])
-        for k in range(int(line.length) + 1):
-            p = line.interpolate(k)
-            total += 1
-            off_road += not road_area.contains(p)
-            in_bld += bld.contains(p)
+        samples.extend(line.interpolate(k) for k in range(int(line.length) + 1))
+    pts = np.array(samples, dtype=object)
+    total = len(pts)
+    xy = shapely.get_coordinates(pts) if total else np.zeros((0, 2))
+    off_road = int(total - shapely.contains_xy(road_area, xy[:, 0], xy[:, 1]).sum()) if total else 0
+    in_bld = len(np.unique(shapely.STRtree(bld).query(pts, predicate="within")[0])) if total and bld else 0
 
     nodes, lanes = lg["nodes"], lg["lanes"]
     used = sorted({n for L in lanes for n in (L["a"], L["b"])})
     remap = {n: i for i, n in enumerate(used)}
     r1 = lambda v: round(v, 1)
+    if compact:
+        n_road = lg["n_road"]
+        road = []
+        for L in lanes[:n_road]:
+            conns = [lanes[c] for c in L["next"]]
+            e = {"p": _delta_dm(L["pts"]), "a": remap[L["a"]], "b": remap[L["b"]], "c": L["cls"], "w": L["w"],
+                 "n": [C["next"][0] for C in conns]}
+            u = [i for i, C in enumerate(conns) if C.get("u")]
+            if u:
+                e["u"] = u
+            if L["ring"]:
+                e["r"] = 1
+            road.append(e)
+        out = {
+            "v": 2, "slice": sl,
+            "note": "Lane graph v2 (build_slice.py): road lanes only. p = delta decimetres (first point absolute), "
+                    "n = road lanes reachable through a junction (connector curves are rebuilt in the app), "
+                    "u = indices into n that are U-turns, r = Badi Chaupar ring. Walks live in the chunk files.",
+            "ring": {"c": [r1(lg["ring"][0][0]), r1(lg["ring"][0][1])], "r": r1(lg["ring"][1])},
+            "nodes": [[r1(nodes[n][0]), r1(nodes[n][1]), 1 if n in lg["boundary"] else 0] for n in used],
+            "lanes": road,
+        }
+        path = ROOT / "data/build" / sl / "lanes.json"
+        path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+        print(f"Lanes (compact): {n_road} road lanes, {len(lanes) - n_road} connectors rebuilt in the app; "
+              f"{len(lg['walks'])} walks to chunks; {off_road}/{total} lane samples off the road surface, "
+              f"{in_bld} inside buildings; {path.stat().st_size // 1024} KB")
+        return
     out = {
         "slice": sl,
         "note": "Lane graph for left-hand traffic (build_slice.py). Lane: p=flat [x,y,...] polyline (local metres), "
@@ -639,7 +771,7 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
         "walks": [[r1(v) for q in w for v in q] for w in lg["walks"]],
         "busy": lg["busy"],
     }
-    path = ROOT / "data/build" / f"{sl}.lanes.json"
+    path = (ROOT / "data/build" / sl / "lanes.json") if (ROOT / "data/build" / sl).is_dir() else (ROOT / "data/build" / f"{sl}.lanes.json")
     path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
     print(f"Lanes: {lg['n_road']} road lanes + {len(lanes) - lg['n_road']} connectors on {len(lg['edges'])} edges "
           f"(dropped {len(lg["dropped"])} fragment edges, {lg["blocked"]} through buildings); {len(out['walks'])} walks; "
@@ -652,10 +784,12 @@ def main() -> None:
     ap.add_argument("--slice", default="slice1")
     args = ap.parse_args()
     sl = args.slice
+    sys.stdout.reconfigure(line_buffering=True)  # progress shows up as it happens
+    # Big slices are written as streamed chunks (data/build/<slice>/...); small ones as one file.
+    chunked = boundary_feature(sl).get("properties", {}).get("chunked", False)
 
     osm = json.loads((ROOT / "data/build" / f"{sl}.osm.geojson").read_text(encoding="utf-8"))
     ov = json.loads((ROOT / "data/raw" / f"{sl}.overture.geojson").read_text(encoding="utf-8"))
-    bnd = json.loads((ROOT / "data/boundary" / f"{sl}.geojson").read_text(encoding="utf-8"))
 
     utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
     ox, oy = utm.transform(ORIGIN_LON, ORIGIN_LAT)
@@ -664,18 +798,23 @@ def main() -> None:
         ux, uy = utm.transform(c[:, 0], c[:, 1])
         return np.column_stack([np.asarray(ux) - ox, np.asarray(uy) - oy])
 
-    clip = shapely.transform(shape(bnd["features"][0]["geometry"]), to_local)
+    clip = shapely.transform(load_boundary(sl), to_local)
 
     feats = osm["features"]
     by_kind = lambda *k: [f for f in feats if f["properties"]["kind"] in k]
     centerlines = by_kind("centerline")
-    roads = unary_union([shape(f["geometry"]) for f in by_kind("road")])
-    major = unary_union([shape(f["geometry"]) for f in by_kind("road") if f["properties"].get("class") in MAIN_ROADS])
-    open_land = unary_union([shape(f["geometry"]) for f in by_kind("open", "green", "water")])
-    footways = unary_union([shape(f["geometry"]) for f in by_kind("footway")])
+    road_parts = [shape(f["geometry"]) for f in by_kind("road")]
+    t0 = time.time()
+    roads = unary_union(road_parts)
+    major_parts = [shape(f["geometry"]) for f in by_kind("road") if f["properties"].get("class") in MAIN_ROADS]
+    open_parts = [shape(f["geometry"]) for f in by_kind("open", "green", "water")]
+    foot_parts = [shape(f["geometry"]) for f in by_kind("footway")]
     # Small holes enclosed by road polygons are roundabouts / traffic islands (e.g. the
     # Badi Chaupar circle), never building plots.
-    islands = unary_union([Polygon(h) for r in to_polys(roads) for h in r.interiors if Polygon(h).area < ISLAND_MAX])
+    island_parts = [Polygon(h) for r in to_polys(roads) for h in r.interiors if Polygon(h).area < ISLAND_MAX]
+    road_ix = NearIndex(road_parts)
+    major_ix = NearIndex(major_parts)
+    print(f"  roads: {len(road_parts)} pieces, {len(island_parts)} islands ({time.time() - t0:.1f}s)")
 
     landmark, reserved = hawa_mahal(centerlines, to_local)
 
@@ -687,11 +826,13 @@ def main() -> None:
             if i:
                 props["id"] += f"#{i}"
             buildings.append((p, props))
-    osm_union = unary_union([p for p, _ in buildings])
 
-    # --- then Overture where OSM has nothing -----------------------------------
+    # --- then Overture where OSM has nothing (spatial index, no growing union) --
+    t0 = time.time()
+    static_block = NearIndex([p for p, _ in buildings] + road_parts + island_parts + [reserved])
+    accepted = GridIndex()
+    clip_prep = shapely.prepared.prep(clip)
     added = skipped = 0
-    blocked = unary_union([osm_union, roads, reserved, islands])
     for n, f in enumerate(ov["features"]):
         pr = f["properties"]
         src = ((pr.get("sources") or [{}])[0] or {}).get("dataset", "")
@@ -699,15 +840,22 @@ def main() -> None:
             continue  # already have OSM directly (and fresher)
         tag = {"Google Open Buildings": "google", "Microsoft ML Buildings": "microsoft", "Esri Community Maps": "esri"}.get(src, "other")
         # Machine-traced outlines are jagged; simplify so walls read as clean planes.
-        geom = shapely.transform(shape(f["geometry"]), to_local).simplify(SIMPLIFY, preserve_topology=True).intersection(clip)
+        geom = shapely.transform(shape(f["geometry"]), to_local).simplify(SIMPLIFY, preserve_topology=True)
+        if not clip_prep.contains(geom):
+            if not clip_prep.intersects(geom):
+                continue
+            geom = geom.intersection(clip)
         for i, p in enumerate(to_polys(geom)):
             if p.area < MIN_AREA:
                 continue
-            if p.intersection(blocked).area > OVERLAP_MAX * p.area:
+            cands = static_block.near(p) + accepted.near(p)
+            local = unary_union(cands) if cands else None
+            if local is not None and p.intersection(local).area > OVERLAP_MAX * p.area:
                 skipped += 1
                 continue
-            p = to_polys(p.difference(blocked))
-            p = max(p, key=lambda q: q.area) if p else None
+            if local is not None:
+                parts = to_polys(p.difference(local))
+                p = max(parts, key=lambda q: q.area) if parts else None
             if p is None or p.area < MIN_AREA:
                 continue
             # Overture keeps its GERS id on the feature, not in properties.
@@ -716,12 +864,17 @@ def main() -> None:
             if pr.get("num_floors"):
                 props["levels"] = float(pr["num_floors"])
             buildings.append((p, props))
-            blocked = blocked.union(p)
+            accepted.add(p)
             added += 1
+    print(f"  overture: +{added} buildings, {skipped} overlapping skipped ({time.time() - t0:.1f}s)")
+    del ov  # the raw city file is large; free it before the heavier steps
 
     # --- frontage fill along main bazaars --------------------------------------
+    t0 = time.time()
     rng = random.Random(f"{sl}-frontage")
-    fill_block = unary_union([blocked, open_land, footways.buffer(0.5)]).buffer(0.5)
+    fill_static = NearIndex([p for p, _ in buildings] + road_parts + island_parts + [reserved] + open_parts
+                            + [g.buffer(0.5) for g in foot_parts])
+    lots_ix = GridIndex()
     generated = 0
     for f in sorted(centerlines, key=lambda f: f["properties"]["id"]):
         if f["properties"]["class"] not in MAIN_ROADS:
@@ -732,15 +885,21 @@ def main() -> None:
         hw = f["properties"]["width"] / 2
         inner, outer = hw + FILL_SETBACK, hw + FILL_SETBACK + FILL_DEPTH
         strip = line.buffer(outer, cap_style="flat").difference(line.buffer(inner, cap_style="flat"))
-        strip = strip.difference(fill_block).intersection(clip)
+        cands = fill_static.near(strip, 1.0) + lots_ix.near(strip, 1.0)
+        if cands:
+            strip = strip.difference(unary_union(cands).buffer(0.5))
+        strip = strip.intersection(clip)
         for part in to_polys(strip):
             for lot in cut_lots(part, line, outer + 5, rng):
                 buildings.append((lot, {"id": f"gen/{generated}", "source": "generated"}))
-                fill_block = fill_block.union(lot.buffer(0.3))
+                lots_ix.add(lot.buffer(0.3))
                 generated += 1
+    print(f"  frontage: {generated} generated lots ({time.time() - t0:.1f}s)")
 
-    # --- fronts, orientation, output -------------------------------------------
-    out_feats = [f for f in feats if f["properties"]["kind"] not in ("building", "centerline")]
+    # --- fronts, orientation ----------------------------------------------------
+    t0 = time.time()
+    ground_feats = [f for f in feats if f["properties"]["kind"] not in ("building", "centerline")]
+    bld_feats = []
     for poly, props in buildings:
         # Inset slightly so neighbours never share a coplanar wall (z-fighting stripes).
         inset = to_polys(poly.buffer(-INSET, join_style="mitre"))
@@ -749,51 +908,172 @@ def main() -> None:
         poly = orient(rnd(max(inset, key=lambda q: q.area)), 1.0)  # CCW exterior
         if not poly.is_valid or poly.area < MIN_AREA:
             continue
-        fronts, bazaar = front_edges(poly, roads, major)
+        fronts, bazaar = front_edges(poly, road_ix, major_ix)
         props = {"kind": "building", **props, "front": fronts}
         if bazaar:
             props["bazaar"] = True
-        out_feats.append({"type": "Feature", "geometry": mapping(poly), "properties": props})
+        bld_feats.append({"type": "Feature", "geometry": mapping(poly), "properties": props})
+    print(f"  fronts: {len(bld_feats)} buildings ({time.time() - t0:.1f}s)")
 
     # Kerbs: the outline of the merged road network (not each overlapping road piece).
     kerb = roads.boundary.intersection(clip.buffer(-0.5))
+    kerb_feats = []
     if not kerb.is_empty:
-        out_feats.append({"type": "Feature", "geometry": mapping(rnd(kerb.simplify(0.2))), "properties": {"kind": "kerb", "id": "kerbs"}})
+        kerb_feats.append({"type": "Feature", "geometry": mapping(rnd(kerb.simplify(0.2))), "properties": {"kind": "kerb", "id": "kerbs"}})
 
+    out_feats = ground_feats + bld_feats + kerb_feats
     order = ["open", "green", "water", "footway", "road", "building", "kerb"]
     out_feats.sort(key=lambda f: (order.index(f["properties"]["kind"]), f["properties"]["id"]))
     src_count: dict[str, int] = {}
-    for f in out_feats:
-        if f["properties"]["kind"] == "building":
-            s = f["properties"]["source"].split(":")[0]
-            src_count[s] = src_count.get(s, 0) + 1
-    fronted = sum(1 for f in out_feats if f["properties"].get("front"))
+    for f in bld_feats:
+        s0 = f["properties"]["source"].split(":")[0]
+        src_count[s0] = src_count.get(s0, 0) + 1
+    fronted = sum(1 for f in bld_feats if f["properties"].get("front"))
 
-    out = {
-        "type": "FeatureCollection",
-        "properties": {
-            "slice": sl,
-            "crs": "local metres from EPSG:32643, origin Badi Chaupar",
-            "origin": [ORIGIN_LON, ORIGIN_LAT],
-            "attribution": "(c) OpenStreetMap contributors (ODbL); Overture Maps Foundation (ODbL), incl. Google Open Buildings and Microsoft ML Buildings",
-            # The diorama base: slice boundary in local metres, CCW, closed.
-            "boundary": [[round(x, 2), round(y, 2)] for x, y in orient(clip, 1.0).exterior.coords],
-        },
-        "features": out_feats,
+    meta = {
+        "slice": sl,
+        "crs": "local metres from EPSG:32643, origin Badi Chaupar",
+        "origin": [ORIGIN_LON, ORIGIN_LAT],
+        "attribution": "(c) OpenStreetMap contributors (ODbL); Overture Maps Foundation (ODbL), incl. Google Open Buildings and Microsoft ML Buildings",
+        # The diorama base: slice boundary in local metres, CCW, closed.
+        "boundary": [[round(x, 2), round(y, 2)] for x, y in orient(clip, 1.0).exterior.coords],
     }
-    (ROOT / "data/build" / f"{sl}.geojson").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
     places = build_places(sl, out_feats, landmark, reserved, to_local)
-    (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"Places: {[p['id'] + ('' if p['wiki'] else ' (blurb only)') for p in places]}")
-    (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+
+    if not chunked:
+        (ROOT / "data/build" / f"{sl}.geojson").write_text(
+            json.dumps({"type": "FeatureCollection", "properties": meta, "features": out_feats}, separators=(",", ":")), encoding="utf-8")
+        (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
+        (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+
     # Lane graph + pedestrian walks for the traffic system (p2-traffic).
+    t0 = time.time()
+    if chunked:
+        (ROOT / "data/build" / sl).mkdir(parents=True, exist_ok=True)
     raw_osm = json.loads((ROOT / "data/raw" / f"{sl}.osm.json").read_text(encoding="utf-8"))
-    bld_union = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"] + [reserved])
-    lg = build_lanes(centerlines, raw_osm, clip, roads, bld_union, to_local, landmark)
-    finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads)
+    bld_polys = [shape(f["geometry"]) for f in bld_feats] + to_polys(reserved)
+    lg = build_lanes(centerlines, raw_osm, clip, roads, bld_polys, to_local, landmark)
+    finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads, compact=chunked)
+    print(f"  lanes ({time.time() - t0:.1f}s)")
+    if chunked:
+        write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, osm_names(centerlines),
+                     walks=(lg["walks"], lg["busy"]))
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "
           f"{fronted} with street fronts")
     print(f"Hawa Mahal anchor {landmark['anchor']} facing {landmark['facingDeg']} deg on '{landmark['street']}'")
+
+
+def osm_names(centerlines) -> list[dict]:
+    """Named streets for the search box: one representative point per name."""
+    by: dict[str, list] = {}
+    for f in centerlines:
+        n = f["properties"].get("name")
+        if n:
+            by.setdefault(n, []).append(shape(f["geometry"]))
+    out = []
+    for n, gs in sorted(by.items()):
+        u = unary_union(gs)
+        pt = u.interpolate(u.length / 2) if hasattr(u, "interpolate") else u.representative_point()
+        out.append({"name": n, "at": [round(pt.x, 1), round(pt.y, 1)]})
+    return out
+
+
+MINI_CELL = 12.0  # m per minimap cell
+
+
+def write_minimap(out_dir, clip, bld_feats, ground_feats) -> None:
+    """A tiny raster of the city for the minimap: per 12 m cell 0 = outside, 1 = open ground,
+    2 = road, 3 = building; run-length encoded as "<count><char>" pairs (a few KB)."""
+    minx, miny, maxx, maxy = clip.bounds
+    w = int(math.ceil((maxx - minx) / MINI_CELL))
+    h = int(math.ceil((maxy - miny) / MINI_CELL))
+    xs = minx + (np.arange(w) + 0.5) * MINI_CELL
+    ys = maxy - (np.arange(h) + 0.5) * MINI_CELL  # row 0 = north
+    gx, gy = np.meshgrid(xs, ys)
+    pts = shapely.points(gx.ravel(), gy.ravel())
+    grid = np.zeros(w * h, dtype=np.uint8)
+    grid[shapely.contains_xy(shapely.prepared.prep(clip).context, gx.ravel(), gy.ravel())] = 1
+    for kind, val in (("road", 2), ("building", 3)):
+        geoms = [shape(f["geometry"]) for f in (bld_feats if kind == "building" else ground_feats) if f["properties"]["kind"] == kind]
+        if not geoms:
+            continue
+        tree = shapely.STRtree(geoms)
+        hit = tree.query(pts, predicate="intersects")
+        grid[np.unique(hit[0])] = val
+    chars = "".join("ORBX"[v] for v in grid)  # O outside, R... see below
+    out, i = [], 0
+    while i < len(chars):
+        j = i
+        while j < len(chars) and chars[j] == chars[i]:
+            j += 1
+        out.append(f"{j - i}{chars[i]}")
+        i = j
+    (out_dir / "minimap.json").write_text(json.dumps({
+        "x0": round(minx, 1), "y1": round(maxy, 1), "cell": MINI_CELL, "w": w, "h": h,
+        "legend": {"O": "outside", "R": "open ground", "B": "road", "X": "building"},
+        "rle": "".join(out)}, separators=(",", ":")), encoding="utf-8")
+    print(f"  minimap: {w}x{h} cells, {sum(len(o) for o in out) / 1000:.0f} KB")
+
+
+def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, names, walks=([], [])) -> None:
+    """City-scale output: data/build/<slice>/index.json + chunks/<cx>_<cy>.json (256 m grid).
+    Ground is clipped to chunk squares; buildings are assigned WHOLE by centroid (never split).
+    Pedestrian walks go to the chunk holding their midpoint (properties.walks / .busy), so
+    people stream with the city instead of loading all at once."""
+    out_dir = ROOT / "data/build" / sl
+    cdir = out_dir / "chunks"
+    if cdir.exists():
+        for old in cdir.glob("*.json"):
+            old.unlink()
+    cdir.mkdir(parents=True, exist_ok=True)
+    chunks: dict[tuple[int, int], list] = {}
+    for f in bld_feats:
+        c = shape(f["geometry"]).centroid
+        chunks.setdefault(chunk_of(c.x, c.y), []).append(f)
+    walk_by: dict[tuple[int, int], tuple[list, list]] = {}
+    for w, b in zip(*walks):
+        mx, my = (w[0][0] + w[-1][0]) / 2, (w[0][1] + w[-1][1]) / 2
+        ws, bs = walk_by.setdefault(chunk_of(mx, my), ([], []))
+        ws.append([round(v, 1) for q in w for v in q])
+        bs.append(b)
+    ground_geoms = [(f, shape(f["geometry"])) for f in ground_feats]
+    gtree = shapely.STRtree([g for _, g in ground_geoms])
+    minx, miny, maxx, maxy = clip.bounds
+    keys = {chunk_of(x, y) for x in np.arange(minx, maxx + CHUNK, CHUNK) for y in np.arange(miny, maxy + CHUNK, CHUNK)}
+    index = []
+    total = 0
+    for cx, cy in sorted(keys):
+        box = shapely.box(cx * CHUNK, cy * CHUNK, (cx + 1) * CHUNK, (cy + 1) * CHUNK)
+        if not box.intersects(clip):
+            continue
+        feats = []
+        for i in gtree.query(box):
+            f, g = ground_geoms[i]
+            part = g.intersection(box)
+            polys = [q for q in to_polys(part) if q.area > 0.05]
+            if not polys:
+                continue
+            geom = polys[0] if len(polys) == 1 else MultiPolygon(polys)
+            feats.append({"type": "Feature", "geometry": mapping(rnd(geom)), "properties": f["properties"]})
+        feats.extend(chunks.get((cx, cy), []))
+        k = kerb.intersection(box) if not kerb.is_empty else None
+        if k is not None and not k.is_empty:
+            feats.append({"type": "Feature", "geometry": mapping(rnd(k)), "properties": {"kind": "kerb", "id": f"kerbs/{cx}_{cy}"}})
+        cw, cb = walk_by.get((cx, cy), ([], []))
+        if not feats and not cw:
+            continue
+        cid = f"{cx}_{cy}"
+        props = {"chunk": cid, "walks": cw, "busy": cb} if cw else {"chunk": cid}
+        text = json.dumps({"type": "FeatureCollection", "properties": props, "features": feats}, separators=(",", ":"))
+        (cdir / f"{cid}.json").write_text(text, encoding="utf-8")
+        total += len(text)
+        index.append({"id": cid, "cx": cx, "cy": cy, "buildings": len(chunks.get((cx, cy), [])), "bytes": len(text)})
+    (out_dir / "index.json").write_text(json.dumps({**meta, "chunkSize": CHUNK, "chunks": index, "names": names}, separators=(",", ":")), encoding="utf-8")
+    write_minimap(out_dir, clip, bld_feats, ground_feats)
+    (out_dir / "places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
+    (out_dir / "landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+    print(f"  chunks: {len(index)} files, {total / 1e6:.1f} MB raw, {sum(c['buildings'] for c in index)} buildings")
 
 
 if __name__ == "__main__":

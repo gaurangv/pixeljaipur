@@ -10,7 +10,9 @@
     "test": "vitest run",
     "shots": "tsx scripts/shots.ts",
     "data": "uv run scripts/fetch_osm.py && uv run scripts/fetch_overture.py && uv run scripts/fetch_places.py && uv run scripts/build_slice.py",
-    "size": "tsx scripts/size.ts"
+    "size": "tsx scripts/size.ts",
+    "travel": "tsx scripts/travel.ts",
+    "data:city": "uv run scripts/fetch_osm.py --slice walled && uv run scripts/fetch_overture.py --slice walled && uv run scripts/fetch_places.py --slice walled && uv run scripts/build_slice.py --slice walled"
   },
   "dependencies": {
     "suncalc": "^2.1.4",

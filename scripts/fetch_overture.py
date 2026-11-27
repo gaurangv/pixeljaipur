@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["overturemaps", "shapely>=2"]
+# dependencies = ["overturemaps", "shapely>=2", "pyproj>=3.6", "numpy"]
 # ///
 """Download Overture Maps buildings for a slice's bounding box.
 
@@ -22,7 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shapely.geometry import shape
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sliceconf import load_boundary  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -33,9 +34,7 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true")
     args = ap.parse_args()
 
-    boundary = json.loads((ROOT / "data/boundary" / f"{args.slice}.geojson").read_text(encoding="utf-8"))
-    geom = boundary["features"][0]["geometry"] if boundary.get("type") == "FeatureCollection" else boundary["geometry"]
-    minx, miny, maxx, maxy = shape(geom).bounds
+    minx, miny, maxx, maxy = load_boundary(args.slice).bounds
     out = ROOT / "data/raw" / f"{args.slice}.overture.geojson"
 
     if out.exists() and not args.refresh:

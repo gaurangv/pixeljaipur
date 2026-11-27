@@ -102,6 +102,9 @@ function pickWall(f: FootprintFeature, rng: Rng): PaletteKey {
   ] as const);
 }
 
+/** Shared geometry (one instance pool per geometry when streaming chunks). */
+const dome = new ConeGeometry(0.5, 1, 8, 1);
+
 export function describeShopHouse(f: FootprintFeature, worldSeed = 1): ShopHouseSpec | null {
   if (f.geometry.type !== 'Polygon') return null;
   const rings = f.geometry.coordinates as Pt[][];
@@ -244,7 +247,6 @@ export function buildShopHouses(
 
   const walls: BufferGeometry[] = [];
 
-  const dome = new ConeGeometry(0.5, 1, 8, 1);
   const batches = {
     arch: new Batch('arch', unitBox, 'terracottaDeep', false),
     pillar: new Batch('pillar', unitBox, 'terracottaShade'),

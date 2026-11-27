@@ -1,0 +1,127 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "walled",
+        "description": "Jaipur walled city, traced through the gates and the OSM city-wall fragments (2026-11-27). The OSM wall is only partly mapped: the west wall (Chandpol), the north arc (Gangapol) and the south gates are anchored to OSM; the EAST side between Zorawar Singh Gate, Suraj Pol and Ghat Gate is APPROXIMATE (refine in geojson.io or by tracing in OSM). build_slice.py buffers this outline ~60 m outwards so gates and the wall itself fit.",
+        "anchors": {
+          "Chandpol": [
+            75.8095,
+            26.9265
+          ],
+          "Ajmeri Gate": [
+            75.8166,
+            26.9175
+          ],
+          "New Gate (Man Gate)": [
+            75.8206,
+            26.9168
+          ],
+          "Sanganeri Gate": [
+            75.8248,
+            26.9159
+          ],
+          "Ghat Gate": [
+            75.8328,
+            26.9136
+          ],
+          "Suraj Pol": [
+            75.8449,
+            26.9192
+          ],
+          "Zorawar Singh Gate": [
+            75.8333,
+            26.9348
+          ],
+          "Gangapol": [
+            75.8252,
+            26.9426
+          ]
+        },
+        "buffer_m": 60,
+        "chunked": true
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.8093,
+              26.9265
+            ],
+            [
+              75.8102,
+              26.9324
+            ],
+            [
+              75.8122,
+              26.9365
+            ],
+            [
+              75.8164,
+              26.939
+            ],
+            [
+              75.822,
+              26.9427
+            ],
+            [
+              75.8252,
+              26.9426
+            ],
+            [
+              75.8271,
+              26.945
+            ],
+            [
+              75.8302,
+              26.9422
+            ],
+            [
+              75.8333,
+              26.9348
+            ],
+            [
+              75.84,
+              26.9285
+            ],
+            [
+              75.8449,
+              26.9192
+            ],
+            [
+              75.842,
+              26.914
+            ],
+            [
+              75.8328,
+              26.9136
+            ],
+            [
+              75.8248,
+              26.9159
+            ],
+            [
+              75.8206,
+              26.9168
+            ],
+            [
+              75.8166,
+              26.9175
+            ],
+            [
+              75.8098,
+              26.9192
+            ],
+            [
+              75.8093,
+              26.9265
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

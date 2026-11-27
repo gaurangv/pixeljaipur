@@ -1,7 +1,7 @@
 import { BufferGeometry, Group, Material, Matrix4, Mesh, Path, Quaternion, Shape, ShapeGeometry, Vector2, Vector3 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toon, toonDither } from '../render/materials';
-import { Batch, unitBox } from './instancing';
+import { Batch, buildPooled, unitBox } from './instancing';
 import type { PaletteKey } from '../render/palette';
 
 /** Feature kinds written by scripts/fetch_osm.py. */
@@ -101,7 +101,7 @@ function buildKerbs(data: FootprintCollection): Mesh | null {
       }
     }
   }
-  return batch.build();
+  return buildPooled([batch], 'kerbs')[0] ?? null;
 }
 
 export function buildFootprints(data: FootprintCollection, { skip = [] as FootprintKind[], mpp = 0.33 } = {}): Group {
