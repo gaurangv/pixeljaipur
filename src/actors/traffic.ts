@@ -109,7 +109,7 @@ export function createTraffic(): System {
       }
       meshes.update();
       // debug / scripts: how many actors are out (scripts/travel.ts)
-      (window as unknown as { __pjActors?: () => object }).__pjActors = () => ({
+      if (typeof window !== 'undefined') (window as unknown as { __pjActors?: () => object }).__pjActors = () => ({
         people: crowd?.activeCount() ?? 0,
         walks: crowd?.count ?? 0,
         vehicles: sim?.vehicles.filter((v) => v.active).length ?? 0,
