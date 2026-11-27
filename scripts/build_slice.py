@@ -375,7 +375,10 @@ def _unit(ax, ay, bx, by):
     return dx / n, dy / n
 
 
-def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, landmark) -> dict:
+def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings: list, to_local, landmark) -> dict:
+    """`buildings`: building polygons (plus reserved landmark plots). Queried through STRtrees,
+    never unioned: a union of the whole city's ~30k footprints exhausts memory."""
+    tl = time.time()
     tags = {f"way/{el['id']}": el.get("tags", {}) for el in raw_osm.get("elements", []) if el["type"] == "way"}
 
     def oneway_of(wid: str) -> int:
@@ -410,13 +413,16 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
         return c
 
     cnt = counts()
+    part_tree = shapely.STRtree([LineString(pt["cs"]) for pt in parts])  # ends move < LANE_SNAP, so pad the query
     for pi, pt in enumerate(parts):
         for end in (0, -1):
             q = pt["cs"][end]
             if cnt[q] > 1 or clip.exterior.distance(Point(q)) < LANE_BOUNDARY:
                 continue
             best = None
-            for oi, other in enumerate(parts):
+            pad = 3 * LANE_SNAP
+            for oi in sorted(part_tree.query(shapely.box(q[0] - pad, q[1] - pad, q[0] + pad, q[1] + pad)).tolist()):
+                other = parts[oi]
                 if oi == pi:
                     continue
                 ol = LineString(other["cs"])
@@ -442,6 +448,8 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
                     acc += seg
             pt["cs"][end] = target
             cnt = counts()
+
+    print(f"    lanes: snapped ends ({time.time() - tl:.1f}s)", flush=True)
 
     # 3. split at nodes (shared vertices and ends) into undirected edges
     node_of: dict = {}
@@ -488,13 +496,19 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
 
     # 5. never drive through a building: drop edges whose lanes would cross one (mapped roads
     #    sometimes run under OSM / Overture footprints), then drop small disconnected fragments
-    solid = buildings.buffer(-0.1)
+    solid = [g for g in (b.buffer(-0.1) for b in buildings) if not g.is_empty]
+    solid_tree = shapely.STRtree(solid)
+
+    def solid_area(body) -> float:
+        # footprints don't overlap, so the summed overlaps equal the overlap with their union
+        return sum(body.intersection(solid[i]).area for i in solid_tree.query(body))
+
     blocked_edges = 0
     kept = []
     for e in edges:
         offs = [0.22 * e["w"], -0.22 * e["w"]] if e["ow"] else [e["w"] / 4, -e["w"] / 4]
         # a vehicle body (about 0.6 m either side of its lane) must not enter a footprint
-        if any(LineString(_offset_left(e["cs"], o)).buffer(0.6).intersection(solid).area > 0.3 for o in offs):
+        if any(solid_area(LineString(_offset_left(e["cs"], o)).buffer(0.6)) > 0.3 for o in offs):
             blocked_edges += 1
             continue
         kept.append(e)
@@ -514,6 +528,8 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
         total[cfind(e["a"])] = total.get(cfind(e["a"]), 0.0) + LineString(e["cs"]).length
     dropped = [e for e in edges if total[cfind(e["a"])] < LANE_MIN_NETWORK]
     edges = [e for e in edges if total[cfind(e["a"])] >= LANE_MIN_NETWORK]
+
+    print(f"    lanes: {len(edges)} edges, {blocked_edges} blocked ({time.time() - tl:.1f}s)", flush=True)
 
     # 6. the roundabout: one-way edges on the Badi Chaupar circle
     ring_pts = [q for e in edges if e["name"] == RING_NAME for q in e["cs"]]
@@ -613,13 +629,22 @@ def build_lanes(centerlines, raw_osm: dict, clip, roads, buildings, to_local, la
                         L["next"].append(cid)
 
     # 9. pedestrian walks: in front of street-facing building edges, along footways, and the Hawa Mahal front
-    bgrid = buildings.buffer(0.45)  # walkers sway up to 0.3 m off the line
+    print(f"    lanes: {len(lanes)} lanes ({time.time() - tl:.1f}s)", flush=True)
+    bgrid = [b.buffer(0.45) for b in buildings]  # walkers sway up to 0.3 m off the line
+    bgrid_tree = shapely.STRtree(bgrid)
+    walk_clip = shapely.prepared.prep(clip.buffer(-1.0))
+    walk_clip_g = clip.buffer(-1.0)
     walks: list[list[tuple[float, float]]] = []
     busy: list[int] = []  # 1 = a bazaar shop front (or the Hawa Mahal): busier with shoppers
 
     def keep_walk(cs, bazaar=False):
         line = LineString(cs)
-        for piece in to_polys_lines(line.difference(bgrid).intersection(clip.buffer(-1.0))):
+        near = bgrid_tree.query(line)
+        if len(near):
+            line = line.difference(unary_union([bgrid[i] for i in near]))
+        if not walk_clip.contains(line):
+            line = line.intersection(walk_clip_g)
+        for piece in to_polys_lines(line):
             if piece.length >= 2.0:
                 walks.append(list(piece.coords))
                 busy.append(1 if bazaar else 0)
@@ -670,16 +695,18 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
         keep_walk([tuple(c) for c in to_local(np.array(coords))])
 
     # sanity: how much of every lane lies on the road surface / inside a building
-    bld = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"]).buffer(-0.2)
+    bld = [g for g in (shape(f["geometry"]).buffer(-0.2) for f in out_feats if f["properties"]["kind"] == "building") if not g.is_empty]
     road_area = roads.buffer(0.3)
-    off_road = in_bld = total = 0
+    shapely.prepare(road_area)
+    samples = []
     for L in lg["lanes"]:
         line = LineString(L["pts"])
-        for k in range(int(line.length) + 1):
-            p = line.interpolate(k)
-            total += 1
-            off_road += not road_area.contains(p)
-            in_bld += bld.contains(p)
+        samples.extend(line.interpolate(k) for k in range(int(line.length) + 1))
+    pts = np.array(samples, dtype=object)
+    total = len(pts)
+    xy = shapely.get_coordinates(pts) if total else np.zeros((0, 2))
+    off_road = int(total - shapely.contains_xy(road_area, xy[:, 0], xy[:, 1]).sum()) if total else 0
+    in_bld = len(np.unique(shapely.STRtree(bld).query(pts, predicate="within")[0])) if total and bld else 0
 
     nodes, lanes = lg["nodes"], lg["lanes"]
     used = sorted({n for L in lanes for n in (L["a"], L["b"])})
@@ -715,6 +742,7 @@ def main() -> None:
     ap.add_argument("--slice", default="slice1")
     args = ap.parse_args()
     sl = args.slice
+    sys.stdout.reconfigure(line_buffering=True)  # progress shows up as it happens
     # Big slices are written as streamed chunks (data/build/<slice>/...); small ones as one file.
     chunked = boundary_feature(sl).get("properties", {}).get("chunked", False)
 
@@ -797,6 +825,7 @@ def main() -> None:
             accepted.add(p)
             added += 1
     print(f"  overture: +{added} buildings, {skipped} overlapping skipped ({time.time() - t0:.1f}s)")
+    del ov  # the raw city file is large; free it before the heavier steps
 
     # --- frontage fill along main bazaars --------------------------------------
     t0 = time.time()
@@ -881,8 +910,8 @@ def main() -> None:
     # Lane graph + pedestrian walks for the traffic system (p2-traffic).
     t0 = time.time()
     raw_osm = json.loads((ROOT / "data/raw" / f"{sl}.osm.json").read_text(encoding="utf-8"))
-    bld_union = unary_union([shape(f["geometry"]) for f in bld_feats] + [reserved])
-    lg = build_lanes(centerlines, raw_osm, clip, roads, bld_union, to_local, landmark)
+    bld_polys = [shape(f["geometry"]) for f in bld_feats] + to_polys(reserved)
+    lg = build_lanes(centerlines, raw_osm, clip, roads, bld_polys, to_local, landmark)
     finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads)
     print(f"  lanes ({time.time() - t0:.1f}s)")
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "

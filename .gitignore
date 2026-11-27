@@ -10,3 +10,4 @@ tests/shots/
 data/raw/*.osm.tiles/
 # Whole-city raw downloads are large (25 MB+) and reproducible with `npm run data -- walled`
 data/raw/walled.*
+data/build/walled.osm.geojson
