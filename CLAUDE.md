@@ -24,7 +24,7 @@ A hand-built, living isometric pixel diorama of Jaipur's walled Pink City in thr
 - **Colours:** every scene colour comes from `src/render/palette.ts`. No inline hex in scene code.
 - **Units:** world units are metres. Local origin is Badi Chaupar. Data is +x east, +y north. three.js is +x east, +y up, **−z north**.
 - **Projection:** 2:1 dimetric (30° elevation, azimuth 45° + 90°·rot), orthographic. Do not change it to true isometric.
-- **Pixels:** render into a low-res target where one texel = `mpp` metres (default 0.33), then nearest-neighbour upscale by an integer `zoom`. Zoom never changes `mpp`.
+- **Pixels / detail zoom:** render into a low-res target where one texel = `mpp` metres, upscaled by an integer factor that keeps each texel ~3 CSS px (1.5 on phones). Zooming steps through `LEVELS` in `src/render/zoomLevels.ts` (mpp 1.0 → 0.11, default level 3 = 0.33) so closer = more detail, never bigger pixels. Anything that depends on texel size (outline threshold, dither cell via `setDitherCell`) must follow the level. `?level=` picks a level; `?mpp=&zoom=` is the old fixed mode used by screenshots; the hash `z` is the level.
 - **No shimmer:** the camera target is texel-snapped (`snapToTexel`). The remainder goes to the upscale shader as a sub-pixel offset.
 - **Determinism:** URL params `mpp`, `zoom`, `rot`, `x`, `y`, `seed`, `outline`, `shot=1` (later `t`). The `#z/x/y/rot` hash is the shareable view. Anything random takes a seed. Nothing in render depends on wall-clock time when `shot=1`.
 - **Draw calls:** merge static geometry per kind/chunk. Use `InstancedMesh` for repeated modules (jharokhas, props).

@@ -24,7 +24,8 @@ describe('url hash state', () => {
 
   it('rejects junk and out-of-range zoom', () => {
     expect(parseHash('#hello')).toBeNull();
-    expect(parseHash('#0/1/2/0')).toBeNull();
+    expect(parseHash('#0/1/2/0')).toEqual({ zoom: 0, x: 1, y: 2, rot: 0 }); // level 0 = overview
+    expect(parseHash('#17/1/2/0')).toBeNull();
     expect(parseHash('#99/1/2/0')).toBeNull();
     expect(parseHash('')).toBeNull();
   });

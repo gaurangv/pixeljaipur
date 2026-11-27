@@ -291,6 +291,7 @@ and a time-of-day mix. Sound is off until the user clicks.
 These override anything above that conflicts.
 
 1. **Pixel scale and zoom are separate.** One render-target pixel is a fixed world size (`mpp`, metres per pixel). Zoom changes only the integer upscale factor (2×, 3×, 4×…).
+   *Superseded 2026-11-27 by "detail zoom":* zooming now moves through levels that change `mpp` (1.0 → 0.11 m) while each texel keeps a constant on-screen size, so zooming in adds detail instead of enlarging pixels. Fixed mode (`?mpp=&zoom=`) remains for screenshots.
 2. **No pan shimmer.** The camera target snaps to the render-target texel grid. The sub-texel remainder is applied as a screen-space offset in the upscale pass.
 3. **Projection is 2:1 dimetric.** Camera elevation is 30° and azimuth is 45° + 90°·rot, so ground diagonals step 2 px across per 1 px up. It is not true isometric (35.264°).
 4. **OSM licence.** "© OpenStreetMap contributors" (ODbL) must be visible on the site and listed in `public/assets/LICENSES.md`.

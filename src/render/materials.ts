@@ -51,6 +51,12 @@ export function toonInstanced(): MeshToonMaterial {
 
 export type DitherPattern = 'soil' | 'speckle' | 'paving';
 
+/** Every dither material's cell uniform, so the grain can follow the zoom level (one texel per cell). */
+const ditherCells: { value: number }[] = [];
+export function setDitherCell(mpp: number): void {
+  for (const u of ditherCells) u.value = mpp;
+}
+
 /**
  * Toon material with a procedural, world-space pixel texture: each world cell of
  * `cell` metres (= one texel at the current pixel scale) picks one of three palette
@@ -65,6 +71,7 @@ export function toonDither(pattern: DitherPattern, shades: [PaletteKey, PaletteK
     uC: { value: new Color(palette[shades[2]]) },
     uCell: { value: cell },
   };
+  ditherCells.push(uniforms.uCell);
   const mode = { soil: 0, speckle: 1, paving: 2 }[pattern];
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);

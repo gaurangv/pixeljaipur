@@ -8,7 +8,8 @@ import { registerSystems } from './core/register';
 import { Systems, type WorldContext } from './core/systems';
 import { buildHawaMahal, type HawaMahalPlacement } from './landmarks/hawaMahal';
 import { cameraBasis, createCamera, normalizeRot, screenToRay, updateCamera, type ScreenView } from './render/camera';
-import { toonDither } from './render/materials';
+import { setDitherCell, toonDither } from './render/materials';
+import { clampLevel, cssPerTexel as cssPerTexelFor, DEFAULT_LEVEL, levelFromHashZoom, mppForLevel, upscaleFor } from './render/zoomLevels';
 import { PixelPass } from './render/pixelPass';
 import { addLighting } from './sky/light';
 import { InfoCard } from './ui/infoCard';
@@ -29,8 +30,9 @@ import type { FootprintCollection } from './world/footprints';
 /**
  * View state comes from (highest first): query params, the #z/x/y/rot hash, then the default
  * view on Hawa Mahal. Query params keep screenshots deterministic:
- *   mpp     metres per render-target pixel (0.33 | 0.5 | 1)   default 0.33
- *   zoom    integer upscale factor (device px per texel)        default 3 x devicePixelRatio
+ *   level   detail zoom level 0..6 (mpp 1.0 .. 0.11)           default 3 (0.33 m/texel)
+ *   mpp     FIXED mode: metres per texel (used with zoom by scripts/shots.ts)
+ *   zoom    FIXED mode: integer upscale (device px per texel)
  *   rot     snap rotation 0..3                                  default 0
  *   x, y    camera target in local metres (east, north)         default: in front of Hawa Mahal
  *   seed    world seed for procedural generation                default 1
@@ -45,11 +47,22 @@ const num = (key: string) => {
   return params.has(key) && Number.isFinite(v) ? v : undefined;
 };
 
-/** Zoom = device pixels per texel. */
+/*
+ * Detail zoom (src/render/zoomLevels.ts): the wheel/pinch steps through levels that change
+ * metres-per-texel, while each texel keeps a constant size on screen. `?mpp=`/`?zoom=` switch to
+ * the old FIXED mode (integer upscale of a fixed mpp), which screenshots and tests rely on.
+ */
 const MAX_ZOOM = 16;
-// ~3 CSS px per texel on desktop; phones get a wider view (1.5 CSS px per texel) so more city fits.
-const cssPerTexel = window.innerWidth < 700 ? 1.5 : 3;
-const defaultZoom = Math.min(MAX_ZOOM, Math.max(1, Math.round(cssPerTexel * (window.devicePixelRatio || 1))));
+const fixedMode = (params.has('mpp') || params.has('zoom')) && !params.has('level');
+const crisp = (() => {
+  try {
+    return localStorage.getItem('pj-crisp') === '1';
+  } catch {
+    return false;
+  }
+})();
+const upscaleNow = () => upscaleFor(cssPerTexelFor(window.innerWidth, crisp), window.devicePixelRatio || 1);
+const defaultZoom = DEFAULT_LEVEL; // hash `z` is now the level
 
 const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
 const defaultView = (() => {
@@ -61,9 +74,11 @@ const defaultView = (() => {
 const fromHash = parseHash(location.hash) ?? {};
 const view = { ...defaultView, ...fromHash };
 
+const initialLevel = clampLevel(num('level') ?? (fromHash.zoom !== undefined ? levelFromHashZoom(fromHash.zoom) : DEFAULT_LEVEL));
 const state = {
-  mpp: num('mpp') ?? 0.33,
-  zoom: Math.min(MAX_ZOOM, Math.max(1, Math.round(num('zoom') ?? view.zoom))),
+  level: initialLevel,
+  mpp: fixedMode ? (num('mpp') ?? 0.33) : mppForLevel(initialLevel),
+  zoom: fixedMode ? Math.min(MAX_ZOOM, Math.max(1, Math.round(num('zoom') ?? upscaleNow()))) : upscaleNow(),
   rot: normalizeRot(num('rot') ?? view.rot),
   // three.js world: +x east, -z north
   target: new Vector3(num('x') ?? view.x, 0, -(num('y') ?? view.y)),
@@ -99,7 +114,8 @@ renderer.info.autoReset = false;
 const pixel = new PixelPass(renderer);
 const camera = createCamera();
 // Ground one texel further up-screen is mpp / tan(30°) ≈ 1.73·mpp deeper; edges must jump more than that.
-pixel.setOutline(outline, Math.max(1.0, 3 * state.mpp));
+const applyOutline = () => pixel.setOutline(outline, Math.max(0.6, 3 * state.mpp));
+applyOutline();
 
 const scene = new Scene();
 // No scene background: empty texels stay transparent and the pixel pass paints the backdrop gradient.
@@ -136,7 +152,7 @@ const pins = new Pins(overlay, places, (id, opener) => openPlace(id, opener));
 const writeHash = hashWriter();
 const saveView = () => {
   if (shotMode) return;
-  writeHash({ zoom: state.zoom, x: state.target.x, y: -state.target.z, rot: state.rot, place: card.openId ?? undefined });
+  writeHash({ zoom: fixedMode ? state.zoom : state.level, x: state.target.x, y: -state.target.z, rot: state.rot, place: card.openId ?? undefined });
 };
 
 function screenView(): ScreenView {
@@ -215,12 +231,48 @@ const invalidate = () => {
   saveView();
 };
 
-function setZoom(z: number) {
-  const next = Math.min(MAX_ZOOM, Math.max(1, Math.round(z)));
-  if (next === state.zoom) return;
-  state.zoom = next;
+/** Ground point (data coords) under a CSS position on the canvas, or null. */
+function groundAt(cssX: number, cssY: number): Vector3 | null {
+  const ray = screenToRay(cssX, cssY, screenView());
+  if (ray.dir.y >= 0) return null;
+  return ray.origin.clone().addScaledVector(ray.dir, -ray.origin.y / ray.dir.y);
+}
+
+/**
+ * Zoom by `steps`. Detail mode moves through levels (mpp changes, texel size on screen doesn't);
+ * fixed mode changes the integer upscale. The world point under (anchorX, anchorY) stays put.
+ */
+function zoomBy(steps: number, anchorX = window.innerWidth / 2, anchorY = window.innerHeight / 2) {
+  const before = groundAt(anchorX, anchorY);
+  if (fixedMode) {
+    const next = Math.min(MAX_ZOOM, Math.max(1, Math.round(state.zoom + steps)));
+    if (next === state.zoom) return;
+    state.zoom = next;
+  } else {
+    const next = clampLevel(state.level + steps);
+    if (next === state.level) return;
+    setLevel(next);
+  }
   resize();
+  const after = groundAt(anchorX, anchorY);
+  if (before && after) {
+    state.target.add(before.sub(after));
+    state.target.y = 0;
+    clampTarget(state.target);
+  }
   invalidate();
+}
+
+function setLevel(level: number) {
+  state.level = clampLevel(level);
+  state.mpp = mppForLevel(state.level);
+  state.zoom = upscaleNow();
+  applyOutline();
+  setDitherCell(state.mpp);
+}
+
+function setZoom(z: number) {
+  zoomBy(Math.round(z) - (fixedMode ? state.zoom : state.level));
 }
 
 // --- Controls: drag to pan, wheel / pinch for integer zoom, Q/E to rotate ---
@@ -237,7 +289,7 @@ canvas.addEventListener('pointerdown', (e) => {
   tap = pointers.size === 1 ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
   ease = null;
   canvas.setPointerCapture(e.pointerId);
-  if (pointers.size === 2) pinchStart = { dist: pinchDist(), zoom: state.zoom };
+  if (pointers.size === 2) pinchStart = { dist: pinchDist(), zoom: fixedMode ? state.zoom : state.level };
 });
 const endPointer = (e: PointerEvent) => {
   if (e.type === 'pointerup' && tap && tap.id === e.pointerId && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 4) {
@@ -285,24 +337,31 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
-    setZoom(state.zoom + (e.deltaY < 0 ? 1 : -1));
+    const rect = canvas.getBoundingClientRect();
+    zoomBy(e.deltaY < 0 ? 1 : -1, e.clientX - rect.left, e.clientY - rect.top);
   },
   { passive: false },
 );
 window.addEventListener('keydown', (e) => {
+  if (e.key === '+' || e.key === '=') return zoomBy(1);
+  if (e.key === '-' || e.key === '_') return zoomBy(-1);
   if (e.key === 'q' || e.key === 'Q') state.rot = normalizeRot(state.rot + 1);
   else if (e.key === 'e' || e.key === 'E') state.rot = normalizeRot(state.rot - 1);
   else return;
   invalidate();
 });
 window.addEventListener('resize', () => {
+  if (!fixedMode) state.zoom = upscaleNow();
   resize();
   dirty = true;
 });
 window.addEventListener('hashchange', () => {
   const v = parseHash(location.hash);
   if (!v) return;
-  if (v.zoom !== undefined) state.zoom = v.zoom;
+  if (v.zoom !== undefined) {
+    if (fixedMode) state.zoom = Math.min(MAX_ZOOM, Math.max(1, v.zoom));
+    else setLevel(levelFromHashZoom(v.zoom));
+  }
   if (v.rot !== undefined) state.rot = normalizeRot(v.rot);
   if (v.x !== undefined && v.y !== undefined) {
     state.target.set(v.x, 0, -v.y);
@@ -338,7 +397,7 @@ async function start() {
   }
   if (initialPlace && placeById.has(initialPlace)) {
     // A shared link: open the card; only centre on the place if the link didn't set a view.
-    openPlace(initialPlace, null, !fromHash.zoom && !params.has('x'));
+    openPlace(initialPlace, null, fromHash.zoom === undefined && !params.has('x'));
   }
   ctx = {
     scene,

@@ -16,3 +16,4 @@
 | 2026-11-26 | Info cards: text fetched live from Wikipedia on open (CC BY-SA, credited); Hindi names under titles; hand-written blurbs as fallback and for places without articles (bazaars, Jama Masjid) |
 | 2026-11-26 | Local origin (OSM "Badi Chaupar" locality node) is ~30 m SW of the roundabout centre; place zones use real geometry, not the origin |
 | 2026-11-26 | Look: stay a live 3D game-like diorama (not AI-painted tiles like Pixel Trichy); pixel scale changed to 0.33 m; slice sits on a diorama base |
+| 2026-11-27 | Detail zoom: zoom levels change mpp (1.0..0.11 m) at constant on-screen texel size, replacing integer upscaling (user found zoomed-in view too pixelated); cursor-anchored wheel zoom; +/- keys |

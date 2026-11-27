@@ -23,7 +23,7 @@ export function parseHash(hash: string): Partial<ViewState> | null {
   const m = /^#?(\d+)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)(?:\/(\d)(?:\/([a-z0-9-]{1,64}))?)?$/.exec(hash.trim());
   if (!m) return null;
   const zoom = Number(m[1]);
-  if (zoom < 1 || zoom > 16) return null;
+  if (zoom < 0 || zoom > 16) return null;
   const out: Partial<ViewState> = { zoom, x: Number(m[2]), y: Number(m[3]) };
   if (m[4] !== undefined) out.rot = Number(m[4]) % 4;
   if (m[5] !== undefined) out.place = m[5];
