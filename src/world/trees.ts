@@ -75,6 +75,9 @@ function ringCentroid(r: Pt[]): Pt {
   return [x / n, y / n];
 }
 
+/** Shared geometry (one instance pool per geometry when streaming chunks). */
+const blob = new IcosahedronGeometry(1, 0);
+
 export function placeTrees(data: FootprintCollection, worldSeed = 1): TreeSpot[] {
   const rng: Rng = rngFor('trees', worldSeed);
   const kind = (k: string) => data.features.filter((f) => f.properties.kind === k);
@@ -144,7 +147,6 @@ export function placeTrees(data: FootprintCollection, worldSeed = 1): TreeSpot[]
 const GREENS: PaletteKey[] = ['treeDark', 'treeMid', 'treeLight'];
 
 export function buildTrees(trees: TreeSpot[], worldSeed = 1): Group {
-  const blob = new IcosahedronGeometry(1, 0);
   const trunk = new Batch('tree:trunk', unitBox, 'trunk');
   const canopy = Object.fromEntries(GREENS.map((k) => [k, new Batch(`tree:${k}`, blob, k)])) as Record<PaletteKey, Batch>;
   for (const t of trees) {

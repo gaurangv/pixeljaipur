@@ -28,6 +28,9 @@ import time
 from pathlib import Path
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sliceconf import load_boundary, tiles  # noqa: E402
 from pyproj import Transformer
 import numpy as np
 import shapely
@@ -65,11 +68,15 @@ GREEN_TAGS = {
 }
 
 
-def overpass_query(poly_wgs: Polygon) -> str:
-    # Overpass poly filter wants "lat lon lat lon ..."
-    coords = " ".join(f"{lat:.7f} {lon:.7f}" for lon, lat in poly_wgs.exterior.coords[:-1])
-    f = f'(poly:"{coords}")'
-    return f"""[out:json][timeout:90];
+def overpass_query(poly_wgs: Polygon | None = None, bbox: tuple[float, float, float, float] | None = None) -> str:
+    """Query by polygon (small slices) or by a (south, west, north, east) bbox tile (big slices)."""
+    if bbox is not None:
+        f = "({:.7f},{:.7f},{:.7f},{:.7f})".format(*bbox)
+    else:
+        # Overpass poly filter wants "lat lon lat lon ..."
+        coords = " ".join(f"{lat:.7f} {lon:.7f}" for lon, lat in poly_wgs.exterior.coords[:-1])
+        f = f'(poly:"{coords}")'
+    return f"""[out:json][timeout:170];
 (
   way["building"]{f};
   relation["building"]{f};
@@ -81,6 +88,10 @@ def overpass_query(poly_wgs: Polygon) -> str:
   way["place"="square"]{f};
   relation["type"="multipolygon"]["landuse"]{f};
   relation["type"="multipolygon"]["leisure"]{f};
+  way["historic"="citywalls"]{f};
+  way["barrier"="city_wall"]{f};
+  nwr["historic"="city_gate"]{f};
+  nwr["barrier"="city_gate"]{f};
 );
 out geom tags;"""
 
@@ -92,7 +103,7 @@ def fetch(query: str) -> dict:
         url = MIRRORS[attempt % len(MIRRORS)]
         try:
             print(f"  Overpass: {url} (attempt {attempt + 1})")
-            r = requests.post(url, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=180)
+            r = requests.post(url, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=200)
             if r.status_code == 200:
                 return r.json()
             last_err = RuntimeError(f"HTTP {r.status_code}: {r.text[:120]!r}")
@@ -172,17 +183,37 @@ def main() -> None:
     raw_path = ROOT / "data/raw" / f"{args.slice}.osm.json"
     out_path = ROOT / "data/build" / f"{args.slice}.osm.geojson"
 
-    b = json.loads(boundary_path.read_text(encoding="utf-8"))
-    poly_wgs = shape(b["features"][0]["geometry"] if b.get("type") == "FeatureCollection" else b["geometry"])
+    assert boundary_path.exists(), boundary_path
+    poly_wgs = load_boundary(args.slice)
 
     if raw_path.exists() and not args.refresh:
         print(f"Using cached {raw_path.relative_to(ROOT)}")
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
     else:
-        print("Fetching from Overpass ...")
-        raw = fetch(overpass_query(poly_wgs))
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"Saved {raw_path.relative_to(ROOT)}")
+        boxes = tiles(poly_wgs)
+        if len(boxes) == 1:
+            print("Fetching from Overpass ...")
+            raw = fetch(overpass_query(poly_wgs))
+        else:
+            # Big slice: one Overpass query per ~800 m tile (a single query times out), merged by id.
+            # Each tile is cached in data/raw/<slice>.osm.tiles/ so an interrupted run resumes.
+            tile_dir = ROOT / "data/raw" / f"{args.slice}.osm.tiles"
+            tile_dir.mkdir(parents=True, exist_ok=True)
+            seen: dict[tuple[str, int], dict] = {}
+            for i, box in enumerate(boxes):
+                tp = tile_dir / f"{i:03d}.json"
+                if tp.exists() and not args.refresh:
+                    part = json.loads(tp.read_text(encoding="utf-8"))
+                else:
+                    print(f"Fetching tile {i + 1}/{len(boxes)} {box} ...")
+                    part = fetch(overpass_query(bbox=box))
+                    tp.write_text(json.dumps(part, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+                    time.sleep(2)  # be polite to the public Overpass servers
+                for el in part.get("elements", []):
+                    seen.setdefault((el["type"], el["id"]), el)
+            raw = {"version": 0.6, "generator": f"pixeljaipur tiled ({len(boxes)} tiles)", "elements": list(seen.values())}
+        raw_path.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(f"Saved {raw_path.relative_to(ROOT)} ({len(raw['elements'])} elements)")
 
     # WGS84 -> UTM 43N -> shift so Badi Chaupar is (0, 0).
     utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)

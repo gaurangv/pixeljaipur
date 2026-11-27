@@ -1,4 +1,4 @@
-import { PCFShadowMap, Scene, Vector3, WebGLRenderer } from 'three';
+import { Group, type Mesh, PCFShadowMap, Scene, Vector3, WebGLRenderer } from 'three';
 import landmarks from '../data/build/slice1.landmarks.json';
 import placesData from '../data/build/slice1.places.json';
 import sliceUrl from '../data/build/slice1.geojson?url';
@@ -21,6 +21,9 @@ import { bounds, buildBase } from './world/base';
 import { buildDressing } from './world/dressing';
 import type { Pt } from './world/geometry';
 import { buildFootprints, loadSlice } from './world/footprints';
+import { ChunkManager, type CityIndex } from './world/chunks';
+import { withPoolSink } from './world/instancing';
+import { InstancePools } from './world/pools';
 import { pickPlace } from './world/picking';
 import { buildRoofs } from './world/roofs';
 import { buildTrees, placeTrees } from './world/trees';
@@ -64,7 +67,17 @@ const crisp = (() => {
 const upscaleNow = () => upscaleFor(cssPerTexelFor(window.innerWidth, crisp), window.devicePixelRatio || 1);
 const defaultZoom = DEFAULT_LEVEL; // hash `z` is now the level
 
-const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
+// --- Whole-city mode (Phase 3): data/build/walled/ streamed in 256 m chunks. `?slice=slice1` = old single slice.
+const cityIndex = (Object.values(import.meta.glob('../data/build/walled/index.json', { import: 'default', eager: true }))[0] ?? null) as CityIndex | null;
+const cityPlaces = Object.values(import.meta.glob('../data/build/walled/places.json', { import: 'default', eager: true }))[0] as { places: unknown[] } | undefined;
+const cityLandmarks = Object.values(import.meta.glob('../data/build/walled/landmarks.json', { import: 'default', eager: true }))[0] as typeof landmarks | undefined;
+const chunkUrls: Record<string, string> = {};
+for (const [path, url] of Object.entries(import.meta.glob('../data/build/walled/chunks/*.json', { query: '?url', import: 'default', eager: true }) as Record<string, string>)) {
+  chunkUrls[path.slice(path.lastIndexOf('/') + 1, -5)] = url;
+}
+const cityMode = !!cityIndex && params.get('slice') !== 'slice1';
+
+const hawa = ((cityMode && cityLandmarks) || landmarks).landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
 const defaultView = (() => {
   if (!hawa) return { zoom: defaultZoom, x: 0, y: 80, rot: 0 };
   // Stand in the street, 12 m in front of the facade; rot 0 looks north-west at it.
@@ -86,7 +99,7 @@ const state = {
 const shotMode = params.get('shot') === '1';
 const outline = params.get('outline') !== '0';
 const seed = Math.round(num('seed') ?? 1);
-const places = placesData.places as unknown as Place[];
+const places = ((cityMode && cityPlaces) || placesData).places as unknown as Place[];
 const placeById = new Map(places.map((p) => [p.id, p]));
 const initialPlace = params.get('card') ?? fromHash.place ?? null;
 
@@ -101,6 +114,8 @@ let ctx: WorldContext | null = null;
 declare global {
   interface Window {
     __pjReady?: boolean;
+    /** City mode: streamed chunk status (scripts/travel.ts reads it). */
+    __pjCity?: () => { loaded: number; busy: boolean };
     /** Render stats for the last frame (scripts/shots.ts reads these). */
     __pjStats?: { calls: number; triangles: number; ms: number; geometries: number };
   }
@@ -132,6 +147,25 @@ function clampTarget(v: Vector3) {
   v.z = -north;
 }
 const sun = addLighting(scene);
+// The sun sits on a rig that follows the camera in 64 m steps, so the (static, refreshed-on-step)
+// shadow map always covers the view wherever you are in the city.
+const sunRig = new Group();
+sunRig.name = 'sunRig';
+scene.add(sunRig);
+sunRig.add(sun);
+sunRig.add(sun.target);
+const SHADOW_STEP = 64;
+function followShadows(): boolean {
+  const cx = Math.round(state.target.x / SHADOW_STEP) * SHADOW_STEP;
+  const cz = Math.round(state.target.z / SHADOW_STEP) * SHADOW_STEP;
+  if (cx === sunRig.position.x && cz === sunRig.position.z) return false;
+  sunRig.position.set(cx, 0, cz);
+  sunRig.updateMatrixWorld(true);
+  sun.shadow.needsUpdate = true;
+  renderer.shadowMap.needsUpdate = true;
+  return true;
+}
+let chunks: ChunkManager | null = null;
 // The scene is static in Phase 1: render the shadow map once, not every frame.
 renderer.shadowMap.autoUpdate = false;
 
@@ -188,6 +222,8 @@ function resize() {
 function frame() {
   const t0 = performance.now();
   renderer.info.reset();
+  if (chunks) chunks.setView(screenView());
+  followShadows();
   const rt = pixel.renderSize;
   const snap = updateCamera(camera, state.target, state.rot, state.mpp, rt.x, rt.y);
   pixel.render(scene, camera, snap.remainderPx);
@@ -220,6 +256,7 @@ function loop(t = 0) {
     }
     dirty = true;
   }
+  if (chunks && chunks.tick(1)) dirty = true; // build at most one streamed chunk per frame
   if (dirty) {
     frame();
     dirty = false;
@@ -372,11 +409,60 @@ window.addEventListener('hashchange', () => {
   dirty = true;
 });
 
+/** Whole-city mode: diorama base + streamed chunks (instanced details go into shared pools). */
+async function startCity(index: CityIndex) {
+  scene.add(buildBase(index.boundary, soil));
+  panBounds = bounds(index.boundary);
+  clampTarget(state.target);
+  const pools = new InstancePools();
+  scene.add(pools.group);
+  chunks = new ChunkManager({
+    index,
+    urlFor: (id) => chunkUrls[id],
+    build: (id, data) => {
+      data.properties = { ...(data.properties ?? {}), boundary: index.boundary };
+      return withPoolSink(
+        (batches) => pools.add(id, batches),
+        () => {
+          const g = new Group();
+          g.name = `chunk:${id}`;
+          g.add(buildFootprints(data, { skip: ['building'], mpp: state.mpp }));
+          const houses = buildShopHouses(data, seed);
+          g.add(houses.group);
+          g.add(buildRoofs(houses.specs, seed));
+          g.add(buildTrees(placeTrees(data, seed), seed));
+          g.add(buildDressing(houses.specs, data, seed));
+          scene.add(g);
+          return { group: g, specs: houses.specs, data };
+        },
+      );
+    },
+    dispose: (id, built) => {
+      scene.remove(built.group);
+      built.group.traverse((o) => (o as Mesh).geometry?.dispose());
+      pools.remove(id);
+    },
+    onLoad: (id, built) => {
+      systems.chunk(id, 'load', built);
+      sun.shadow.needsUpdate = true;
+      renderer.shadowMap.needsUpdate = true;
+    },
+    onUnload: (id, built) => systems.chunk(id, 'unload', built),
+  });
+  if (shotMode) await chunks.loadAll(screenView());
+  else chunks.setView(screenView());
+  if (hawa) scene.add(buildHawaMahal(hawa));
+}
+
 async function start() {
   resize();
   let slice: FootprintCollection = { type: 'FeatureCollection', features: [] };
   let specs: ShopHouseSpec[] = [];
   try {
+    if (cityMode && cityIndex) {
+      await startCity(cityIndex);
+      throw 'city'; // skip the single-slice path below
+    }
     slice = await loadSlice(sliceUrl);
     const boundary = (slice as unknown as { properties?: { boundary?: Pt[] } }).properties?.boundary;
     if (boundary) {
@@ -393,8 +479,9 @@ async function start() {
     scene.add(buildDressing(houses.specs, slice, seed));
     if (hawa) scene.add(buildHawaMahal(hawa));
   } catch (err) {
-    console.error('[pixeljaipur] slice failed to load', err);
+    if (err !== 'city') console.error('[pixeljaipur] slice failed to load', err);
   }
+  window.__pjCity = cityMode ? () => ({ loaded: chunks?.loadedIds.length ?? 0, busy: chunks?.busy ?? false }) : undefined;
   if (initialPlace && placeById.has(initialPlace)) {
     // A shared link: open the card; only centre on the place if the link didn't set a view.
     openPlace(initialPlace, null, fromHash.zoom === undefined && !params.has('x'));
@@ -422,6 +509,8 @@ async function start() {
     shot: shotMode,
   };
   await systems.init(ctx);
+  // Chunks built before the systems existed (screenshot mode loads them up front): replay.
+  chunks?.forEachLoaded((id, built) => systems.chunk(id, 'load', built));
   systems.update(0, clock.now(), ctx);
   sun.shadow.needsUpdate = true;
   renderer.shadowMap.needsUpdate = true;

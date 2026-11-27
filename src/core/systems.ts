@@ -1,4 +1,5 @@
 import type { DirectionalLight, Scene, WebGLRenderer } from 'three';
+import type { BuiltChunk } from '../world/chunks';
 import type { ScreenView } from '../render/camera';
 import type { Place } from '../ui/places';
 import type { FootprintCollection } from '../world/footprints';
@@ -46,6 +47,8 @@ export interface System {
   update(dt: number, now: WorldTime, ctx: WorldContext): void;
   /** True while this system needs continuous frames (moving traffic, fading lamps). */
   animating(): boolean;
+  /** City streaming: a chunk was built (load) or removed (unload). Specs/data are that chunk's. */
+  onChunk?(id: string, type: 'load' | 'unload', chunk: BuiltChunk, ctx: WorldContext): void;
   dispose?(): void;
 }
 
@@ -65,7 +68,21 @@ export class Systems {
     return this.list.map((s) => s.id);
   }
 
+  private ctx: WorldContext | null = null;
+
+  chunk(id: string, type: 'load' | 'unload', chunk: BuiltChunk): void {
+    if (!this.ctx) return;
+    for (const s of this.list) {
+      try {
+        s.onChunk?.(id, type, chunk, this.ctx);
+      } catch (err) {
+        console.error(`[pixeljaipur] system '${s.id}' chunk ${type} failed`, err);
+      }
+    }
+  }
+
   async init(ctx: WorldContext): Promise<void> {
+    this.ctx = ctx;
     for (const s of this.list) {
       try {
         await s.init(ctx);

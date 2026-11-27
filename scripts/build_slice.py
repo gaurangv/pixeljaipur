@@ -26,6 +26,8 @@ import argparse
 import json
 import math
 import random
+import sys
+import time
 import re
 from pathlib import Path
 
@@ -35,6 +37,10 @@ from pyproj import Transformer
 from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
 from shapely.ops import nearest_points, split, unary_union
+import shapely.prepared
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sliceconf import boundary_feature, load_boundary  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 ORIGIN_LAT, ORIGIN_LON = 26.9225798, 75.8267125  # Badi Chaupar, same as fetch_osm.py
@@ -58,6 +64,63 @@ HAWA_MAHAL = {"lon": 75.8268652, "lat": 26.923932}
 HAWA_WIDTH = 50.0  # facade length along the street (m). Tune against docs/refs/.
 HAWA_DEPTH = 24.0  # reserved depth behind the facade (m)
 HAWA_SETBACK = 3.0  # footpath + plinth between kerb and facade (m)
+
+
+class NearIndex:
+    """Spatial index answering .distance(point) against many geometries (replaces one giant union,
+    whose distance queries get slower with every road in the city)."""
+
+    def __init__(self, geoms, reach: float = 40.0):
+        self.g = [g for g in geoms if g is not None and not g.is_empty]
+        self.t = shapely.STRtree(self.g) if self.g else None
+        self.reach = reach
+
+    def distance(self, p) -> float:
+        if self.t is None:
+            return float("inf")
+        r = self.reach
+        idx = self.t.query(shapely.box(p.x - r, p.y - r, p.x + r, p.y + r))
+        return min((self.g[i].distance(p) for i in idx), default=float("inf"))
+
+    def near(self, geom, pad: float = 0.0) -> list:
+        if self.t is None:
+            return []
+        minx, miny, maxx, maxy = geom.bounds
+        return [self.g[i] for i in self.t.query(shapely.box(minx - pad, miny - pad, maxx + pad, maxy + pad))]
+
+
+class GridIndex:
+    """Grows as polygons are accepted (STRtree can't): cells of `cell` metres."""
+
+    def __init__(self, cell: float = 40.0):
+        self.cell = cell
+        self.cells: dict[tuple[int, int], list] = {}
+
+    def add(self, g) -> None:
+        minx, miny, maxx, maxy = g.bounds
+        c = self.cell
+        for i in range(int(minx // c), int(maxx // c) + 1):
+            for j in range(int(miny // c), int(maxy // c) + 1):
+                self.cells.setdefault((i, j), []).append(g)
+
+    def near(self, geom, pad: float = 0.0) -> list:
+        minx, miny, maxx, maxy = geom.bounds
+        c = self.cell
+        out, seen = [], set()
+        for i in range(int((minx - pad) // c), int((maxx + pad) // c) + 1):
+            for j in range(int((miny - pad) // c), int((maxy + pad) // c) + 1):
+                for g in self.cells.get((i, j), ()):
+                    if id(g) not in seen:
+                        seen.add(id(g))
+                        out.append(g)
+        return out
+
+
+CHUNK = 256.0  # m, runtime streaming grid (src/world/chunks.ts must match)
+
+
+def chunk_of(x: float, y: float) -> tuple[int, int]:
+    return int(math.floor(x / CHUNK)), int(math.floor(y / CHUNK))
 
 
 def to_polys(geom) -> list[Polygon]:
@@ -639,7 +702,7 @@ def finish_lanes(sl: str, lg: dict, out_feats: list, raw_osm: dict, to_local, cl
         "walks": [[r1(v) for q in w for v in q] for w in lg["walks"]],
         "busy": lg["busy"],
     }
-    path = ROOT / "data/build" / f"{sl}.lanes.json"
+    path = (ROOT / "data/build" / sl / "lanes.json") if (ROOT / "data/build" / sl).is_dir() else (ROOT / "data/build" / f"{sl}.lanes.json")
     path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
     print(f"Lanes: {lg['n_road']} road lanes + {len(lanes) - lg['n_road']} connectors on {len(lg['edges'])} edges "
           f"(dropped {len(lg["dropped"])} fragment edges, {lg["blocked"]} through buildings); {len(out['walks'])} walks; "
@@ -652,10 +715,11 @@ def main() -> None:
     ap.add_argument("--slice", default="slice1")
     args = ap.parse_args()
     sl = args.slice
+    # Big slices are written as streamed chunks (data/build/<slice>/...); small ones as one file.
+    chunked = boundary_feature(sl).get("properties", {}).get("chunked", False)
 
     osm = json.loads((ROOT / "data/build" / f"{sl}.osm.geojson").read_text(encoding="utf-8"))
     ov = json.loads((ROOT / "data/raw" / f"{sl}.overture.geojson").read_text(encoding="utf-8"))
-    bnd = json.loads((ROOT / "data/boundary" / f"{sl}.geojson").read_text(encoding="utf-8"))
 
     utm = Transformer.from_crs("EPSG:4326", "EPSG:32643", always_xy=True)
     ox, oy = utm.transform(ORIGIN_LON, ORIGIN_LAT)
@@ -664,18 +728,23 @@ def main() -> None:
         ux, uy = utm.transform(c[:, 0], c[:, 1])
         return np.column_stack([np.asarray(ux) - ox, np.asarray(uy) - oy])
 
-    clip = shapely.transform(shape(bnd["features"][0]["geometry"]), to_local)
+    clip = shapely.transform(load_boundary(sl), to_local)
 
     feats = osm["features"]
     by_kind = lambda *k: [f for f in feats if f["properties"]["kind"] in k]
     centerlines = by_kind("centerline")
-    roads = unary_union([shape(f["geometry"]) for f in by_kind("road")])
-    major = unary_union([shape(f["geometry"]) for f in by_kind("road") if f["properties"].get("class") in MAIN_ROADS])
-    open_land = unary_union([shape(f["geometry"]) for f in by_kind("open", "green", "water")])
-    footways = unary_union([shape(f["geometry"]) for f in by_kind("footway")])
+    road_parts = [shape(f["geometry"]) for f in by_kind("road")]
+    t0 = time.time()
+    roads = unary_union(road_parts)
+    major_parts = [shape(f["geometry"]) for f in by_kind("road") if f["properties"].get("class") in MAIN_ROADS]
+    open_parts = [shape(f["geometry"]) for f in by_kind("open", "green", "water")]
+    foot_parts = [shape(f["geometry"]) for f in by_kind("footway")]
     # Small holes enclosed by road polygons are roundabouts / traffic islands (e.g. the
     # Badi Chaupar circle), never building plots.
-    islands = unary_union([Polygon(h) for r in to_polys(roads) for h in r.interiors if Polygon(h).area < ISLAND_MAX])
+    island_parts = [Polygon(h) for r in to_polys(roads) for h in r.interiors if Polygon(h).area < ISLAND_MAX]
+    road_ix = NearIndex(road_parts)
+    major_ix = NearIndex(major_parts)
+    print(f"  roads: {len(road_parts)} pieces, {len(island_parts)} islands ({time.time() - t0:.1f}s)")
 
     landmark, reserved = hawa_mahal(centerlines, to_local)
 
@@ -687,11 +756,13 @@ def main() -> None:
             if i:
                 props["id"] += f"#{i}"
             buildings.append((p, props))
-    osm_union = unary_union([p for p, _ in buildings])
 
-    # --- then Overture where OSM has nothing -----------------------------------
+    # --- then Overture where OSM has nothing (spatial index, no growing union) --
+    t0 = time.time()
+    static_block = NearIndex([p for p, _ in buildings] + road_parts + island_parts + [reserved])
+    accepted = GridIndex()
+    clip_prep = shapely.prepared.prep(clip)
     added = skipped = 0
-    blocked = unary_union([osm_union, roads, reserved, islands])
     for n, f in enumerate(ov["features"]):
         pr = f["properties"]
         src = ((pr.get("sources") or [{}])[0] or {}).get("dataset", "")
@@ -699,15 +770,22 @@ def main() -> None:
             continue  # already have OSM directly (and fresher)
         tag = {"Google Open Buildings": "google", "Microsoft ML Buildings": "microsoft", "Esri Community Maps": "esri"}.get(src, "other")
         # Machine-traced outlines are jagged; simplify so walls read as clean planes.
-        geom = shapely.transform(shape(f["geometry"]), to_local).simplify(SIMPLIFY, preserve_topology=True).intersection(clip)
+        geom = shapely.transform(shape(f["geometry"]), to_local).simplify(SIMPLIFY, preserve_topology=True)
+        if not clip_prep.contains(geom):
+            if not clip_prep.intersects(geom):
+                continue
+            geom = geom.intersection(clip)
         for i, p in enumerate(to_polys(geom)):
             if p.area < MIN_AREA:
                 continue
-            if p.intersection(blocked).area > OVERLAP_MAX * p.area:
+            cands = static_block.near(p) + accepted.near(p)
+            local = unary_union(cands) if cands else None
+            if local is not None and p.intersection(local).area > OVERLAP_MAX * p.area:
                 skipped += 1
                 continue
-            p = to_polys(p.difference(blocked))
-            p = max(p, key=lambda q: q.area) if p else None
+            if local is not None:
+                parts = to_polys(p.difference(local))
+                p = max(parts, key=lambda q: q.area) if parts else None
             if p is None or p.area < MIN_AREA:
                 continue
             # Overture keeps its GERS id on the feature, not in properties.
@@ -716,12 +794,16 @@ def main() -> None:
             if pr.get("num_floors"):
                 props["levels"] = float(pr["num_floors"])
             buildings.append((p, props))
-            blocked = blocked.union(p)
+            accepted.add(p)
             added += 1
+    print(f"  overture: +{added} buildings, {skipped} overlapping skipped ({time.time() - t0:.1f}s)")
 
     # --- frontage fill along main bazaars --------------------------------------
+    t0 = time.time()
     rng = random.Random(f"{sl}-frontage")
-    fill_block = unary_union([blocked, open_land, footways.buffer(0.5)]).buffer(0.5)
+    fill_static = NearIndex([p for p, _ in buildings] + road_parts + island_parts + [reserved] + open_parts
+                            + [g.buffer(0.5) for g in foot_parts])
+    lots_ix = GridIndex()
     generated = 0
     for f in sorted(centerlines, key=lambda f: f["properties"]["id"]):
         if f["properties"]["class"] not in MAIN_ROADS:
@@ -732,15 +814,21 @@ def main() -> None:
         hw = f["properties"]["width"] / 2
         inner, outer = hw + FILL_SETBACK, hw + FILL_SETBACK + FILL_DEPTH
         strip = line.buffer(outer, cap_style="flat").difference(line.buffer(inner, cap_style="flat"))
-        strip = strip.difference(fill_block).intersection(clip)
+        cands = fill_static.near(strip, 1.0) + lots_ix.near(strip, 1.0)
+        if cands:
+            strip = strip.difference(unary_union(cands).buffer(0.5))
+        strip = strip.intersection(clip)
         for part in to_polys(strip):
             for lot in cut_lots(part, line, outer + 5, rng):
                 buildings.append((lot, {"id": f"gen/{generated}", "source": "generated"}))
-                fill_block = fill_block.union(lot.buffer(0.3))
+                lots_ix.add(lot.buffer(0.3))
                 generated += 1
+    print(f"  frontage: {generated} generated lots ({time.time() - t0:.1f}s)")
 
-    # --- fronts, orientation, output -------------------------------------------
-    out_feats = [f for f in feats if f["properties"]["kind"] not in ("building", "centerline")]
+    # --- fronts, orientation ----------------------------------------------------
+    t0 = time.time()
+    ground_feats = [f for f in feats if f["properties"]["kind"] not in ("building", "centerline")]
+    bld_feats = []
     for poly, props in buildings:
         # Inset slightly so neighbours never share a coplanar wall (z-fighting stripes).
         inset = to_polys(poly.buffer(-INSET, join_style="mitre"))
@@ -749,51 +837,121 @@ def main() -> None:
         poly = orient(rnd(max(inset, key=lambda q: q.area)), 1.0)  # CCW exterior
         if not poly.is_valid or poly.area < MIN_AREA:
             continue
-        fronts, bazaar = front_edges(poly, roads, major)
+        fronts, bazaar = front_edges(poly, road_ix, major_ix)
         props = {"kind": "building", **props, "front": fronts}
         if bazaar:
             props["bazaar"] = True
-        out_feats.append({"type": "Feature", "geometry": mapping(poly), "properties": props})
+        bld_feats.append({"type": "Feature", "geometry": mapping(poly), "properties": props})
+    print(f"  fronts: {len(bld_feats)} buildings ({time.time() - t0:.1f}s)")
 
     # Kerbs: the outline of the merged road network (not each overlapping road piece).
     kerb = roads.boundary.intersection(clip.buffer(-0.5))
+    kerb_feats = []
     if not kerb.is_empty:
-        out_feats.append({"type": "Feature", "geometry": mapping(rnd(kerb.simplify(0.2))), "properties": {"kind": "kerb", "id": "kerbs"}})
+        kerb_feats.append({"type": "Feature", "geometry": mapping(rnd(kerb.simplify(0.2))), "properties": {"kind": "kerb", "id": "kerbs"}})
 
+    out_feats = ground_feats + bld_feats + kerb_feats
     order = ["open", "green", "water", "footway", "road", "building", "kerb"]
     out_feats.sort(key=lambda f: (order.index(f["properties"]["kind"]), f["properties"]["id"]))
     src_count: dict[str, int] = {}
-    for f in out_feats:
-        if f["properties"]["kind"] == "building":
-            s = f["properties"]["source"].split(":")[0]
-            src_count[s] = src_count.get(s, 0) + 1
-    fronted = sum(1 for f in out_feats if f["properties"].get("front"))
+    for f in bld_feats:
+        s0 = f["properties"]["source"].split(":")[0]
+        src_count[s0] = src_count.get(s0, 0) + 1
+    fronted = sum(1 for f in bld_feats if f["properties"].get("front"))
 
-    out = {
-        "type": "FeatureCollection",
-        "properties": {
-            "slice": sl,
-            "crs": "local metres from EPSG:32643, origin Badi Chaupar",
-            "origin": [ORIGIN_LON, ORIGIN_LAT],
-            "attribution": "(c) OpenStreetMap contributors (ODbL); Overture Maps Foundation (ODbL), incl. Google Open Buildings and Microsoft ML Buildings",
-            # The diorama base: slice boundary in local metres, CCW, closed.
-            "boundary": [[round(x, 2), round(y, 2)] for x, y in orient(clip, 1.0).exterior.coords],
-        },
-        "features": out_feats,
+    meta = {
+        "slice": sl,
+        "crs": "local metres from EPSG:32643, origin Badi Chaupar",
+        "origin": [ORIGIN_LON, ORIGIN_LAT],
+        "attribution": "(c) OpenStreetMap contributors (ODbL); Overture Maps Foundation (ODbL), incl. Google Open Buildings and Microsoft ML Buildings",
+        # The diorama base: slice boundary in local metres, CCW, closed.
+        "boundary": [[round(x, 2), round(y, 2)] for x, y in orient(clip, 1.0).exterior.coords],
     }
-    (ROOT / "data/build" / f"{sl}.geojson").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
     places = build_places(sl, out_feats, landmark, reserved, to_local)
-    (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"Places: {[p['id'] + ('' if p['wiki'] else ' (blurb only)') for p in places]}")
-    (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+
+    if not chunked:
+        (ROOT / "data/build" / f"{sl}.geojson").write_text(
+            json.dumps({"type": "FeatureCollection", "properties": meta, "features": out_feats}, separators=(",", ":")), encoding="utf-8")
+        (ROOT / "data/build" / f"{sl}.places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
+        (ROOT / "data/build" / f"{sl}.landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+    else:
+        write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, osm_names(centerlines))
+
     # Lane graph + pedestrian walks for the traffic system (p2-traffic).
+    t0 = time.time()
     raw_osm = json.loads((ROOT / "data/raw" / f"{sl}.osm.json").read_text(encoding="utf-8"))
-    bld_union = unary_union([shape(f["geometry"]) for f in out_feats if f["properties"]["kind"] == "building"] + [reserved])
+    bld_union = unary_union([shape(f["geometry"]) for f in bld_feats] + [reserved])
     lg = build_lanes(centerlines, raw_osm, clip, roads, bld_union, to_local, landmark)
     finish_lanes(sl, lg, out_feats, raw_osm, to_local, clip, roads)
+    print(f"  lanes ({time.time() - t0:.1f}s)")
     print(f"Buildings by source {src_count} (overture added {added}, skipped as overlapping {skipped}); "
           f"{fronted} with street fronts")
     print(f"Hawa Mahal anchor {landmark['anchor']} facing {landmark['facingDeg']} deg on '{landmark['street']}'")
+
+
+def osm_names(centerlines) -> list[dict]:
+    """Named streets for the search box: one representative point per name."""
+    by: dict[str, list] = {}
+    for f in centerlines:
+        n = f["properties"].get("name")
+        if n:
+            by.setdefault(n, []).append(shape(f["geometry"]))
+    out = []
+    for n, gs in sorted(by.items()):
+        u = unary_union(gs)
+        pt = u.interpolate(u.length / 2) if hasattr(u, "interpolate") else u.representative_point()
+        out.append({"name": n, "at": [round(pt.x, 1), round(pt.y, 1)]})
+    return out
+
+
+def write_chunks(sl, meta, ground_feats, bld_feats, kerb, clip, places, landmark, names) -> None:
+    """City-scale output: data/build/<slice>/index.json + chunks/<cx>_<cy>.json (256 m grid).
+    Ground is clipped to chunk squares; buildings are assigned WHOLE by centroid (never split)."""
+    out_dir = ROOT / "data/build" / sl
+    cdir = out_dir / "chunks"
+    if cdir.exists():
+        for old in cdir.glob("*.json"):
+            old.unlink()
+    cdir.mkdir(parents=True, exist_ok=True)
+    chunks: dict[tuple[int, int], list] = {}
+    for f in bld_feats:
+        c = shape(f["geometry"]).centroid
+        chunks.setdefault(chunk_of(c.x, c.y), []).append(f)
+    ground_geoms = [(f, shape(f["geometry"])) for f in ground_feats]
+    gtree = shapely.STRtree([g for _, g in ground_geoms])
+    minx, miny, maxx, maxy = clip.bounds
+    keys = {chunk_of(x, y) for x in np.arange(minx, maxx + CHUNK, CHUNK) for y in np.arange(miny, maxy + CHUNK, CHUNK)}
+    index = []
+    total = 0
+    for cx, cy in sorted(keys):
+        box = shapely.box(cx * CHUNK, cy * CHUNK, (cx + 1) * CHUNK, (cy + 1) * CHUNK)
+        if not box.intersects(clip):
+            continue
+        feats = []
+        for i in gtree.query(box):
+            f, g = ground_geoms[i]
+            part = g.intersection(box)
+            polys = [q for q in to_polys(part) if q.area > 0.05]
+            if not polys:
+                continue
+            geom = polys[0] if len(polys) == 1 else MultiPolygon(polys)
+            feats.append({"type": "Feature", "geometry": mapping(rnd(geom)), "properties": f["properties"]})
+        feats.extend(chunks.get((cx, cy), []))
+        k = kerb.intersection(box) if not kerb.is_empty else None
+        if k is not None and not k.is_empty:
+            feats.append({"type": "Feature", "geometry": mapping(rnd(k)), "properties": {"kind": "kerb", "id": f"kerbs/{cx}_{cy}"}})
+        if not feats:
+            continue
+        cid = f"{cx}_{cy}"
+        text = json.dumps({"type": "FeatureCollection", "properties": {"chunk": cid}, "features": feats}, separators=(",", ":"))
+        (cdir / f"{cid}.json").write_text(text, encoding="utf-8")
+        total += len(text)
+        index.append({"id": cid, "cx": cx, "cy": cy, "buildings": len(chunks.get((cx, cy), [])), "bytes": len(text)})
+    (out_dir / "index.json").write_text(json.dumps({**meta, "chunkSize": CHUNK, "chunks": index, "names": names}, separators=(",", ":")), encoding="utf-8")
+    (out_dir / "places.json").write_text(json.dumps({"places": places}, ensure_ascii=False, indent=1), encoding="utf-8")
+    (out_dir / "landmarks.json").write_text(json.dumps({"landmarks": [landmark]}, indent=2), encoding="utf-8")
+    print(f"  chunks: {len(index)} files, {total / 1e6:.1f} MB raw, {sum(c['buildings'] for c in index)} buildings")
 
 
 if __name__ == "__main__":

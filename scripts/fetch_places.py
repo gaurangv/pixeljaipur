@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["requests", "shapely>=2"]
+# dependencies = ["requests", "shapely>=2", "pyproj>=3.6", "numpy"]
 # ///
 """Look up Wikipedia/Wikidata info for the slice's places (build time only).
 
@@ -21,10 +21,14 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
 import requests
-from shapely.geometry import Point, shape
+from shapely.geometry import Point
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sliceconf import load_boundary  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 HEADERS = {"User-Agent": "PixelJaipur/0.1 (https://github.com/gaurangv/pixeljaipur)"}
@@ -39,7 +43,12 @@ def get(url: str, **params) -> dict:
 
 
 def resolve_titles(titles: list[str]) -> dict[str, dict]:
-    """title -> {title (canonical), qid} or {missing: True}."""
+    """title -> {title (canonical), qid} or {missing: True}. The API takes 50 titles per call."""
+    if len(titles) > 50:
+        out: dict[str, dict] = {}
+        for i in range(0, len(titles), 50):
+            out.update(resolve_titles(titles[i : i + 50]))
+        return out
     if not titles:
         return {}
     q = get(WP, action="query", redirects=1, prop="pageprops", ppprop="wikibase_item", titles="|".join(titles))["query"]
@@ -56,6 +65,11 @@ def resolve_titles(titles: list[str]) -> dict[str, dict]:
 
 def hindi_labels(qids: list[str]) -> dict[str, str]:
     qids = [q for q in qids if q]
+    if len(qids) > 50:
+        out: dict[str, str] = {}
+        for i in range(0, len(qids), 50):
+            out.update(hindi_labels(qids[i : i + 50]))
+        return out
     if not qids:
         return {}
     e = get(WD, action="wbgetentities", ids="|".join(qids), props="labels", languages="hi")["entities"]
@@ -73,22 +87,32 @@ def main() -> None:
         return
 
     curated = json.loads((ROOT / "data/places.curated.json").read_text(encoding="utf-8"))
-    b = json.loads((ROOT / "data/boundary" / f"{args.slice}.geojson").read_text(encoding="utf-8"))
-    poly = shape(b["features"][0]["geometry"])
+    poly = load_boundary(args.slice)
     c = poly.centroid
     # radius (m) that covers the whole boundary, roughly
     r = max(math.hypot((x - c.x) * 111_320 * math.cos(math.radians(c.y)), (y - c.y) * 110_574) for x, y in poly.exterior.coords)
+    # Big slices: geosearch from a grid of points (each call returns a limited number of results).
+    centres = [(c.x, c.y, min(10_000, int(r) + 50))]
+    if r > 900:
+        minx, miny, maxx, maxy = poly.bounds
+        dlat, dlon = 1000 / 110_574, 1000 / (111_320 * math.cos(math.radians(c.y)))
+        centres = [(minx + dlon * (i + 0.5), miny + dlat * (j + 0.5), 760)
+                   for i in range(int((maxx - minx) / dlon) + 1) for j in range(int((maxy - miny) / dlat) + 1)]
 
     titles = [p["wiki"] for p in curated["places"] if p.get("wiki")]
     resolved = resolve_titles(titles)
     for t, v in resolved.items():
         print(f"  curated  {t!r}: {'MISSING' if v.get('missing') else v}")
 
-    geo = get(WP, action="query", list="geosearch", gscoord=f"{c.y}|{c.x}", gsradius=min(10_000, int(r) + 50), gslimit=100)
+    results: dict[str, dict] = {}
+    for lon, lat, rad in centres:
+        geo = get(WP, action="query", list="geosearch", gscoord=f"{lat}|{lon}", gsradius=rad, gslimit=500)
+        for g in geo["query"]["geosearch"]:
+            results.setdefault(g["title"], g)
     exclude = [re.compile(p, re.I) for p in curated.get("discover", {}).get("exclude", [])]
     known = {v.get("title") for v in resolved.values()} | set(titles)
     found = []
-    for g in geo["query"]["geosearch"]:
+    for g in sorted(results.values(), key=lambda g: g["title"]):
         t = g["title"]
         if t in known or any(p.search(t) for p in exclude) or not poly.contains(Point(g["lon"], g["lat"])):
             continue

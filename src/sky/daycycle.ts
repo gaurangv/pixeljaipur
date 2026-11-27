@@ -30,8 +30,17 @@ const FADE_SEC = 0.45;
 export function createDayCycle(): System {
   const stepper = new SunStepper();
   let sky: HemisphereLight | null = null;
-  let lights: CityLights | null = null;
-  let levels = new Float32Array(0);
+  /** City lights per source: 'slice' (single-slice mode) or a streamed chunk id. */
+  const sets = new Map<string, { lights: CityLights; levels: Float32Array }>();
+  let lastAlt = 90;
+  const addSet = (key: string, lights: CityLights, ctx: WorldContext) => {
+    // Start at the current state (no fade-in when a chunk streams in after dusk).
+    const levels = new Float32Array(lights.count);
+    for (let i = 0; i < levels.length; i++) levels[i] = lastAlt < lights.thresholds[i] ? 1 : 0;
+    lights.apply(levels);
+    sets.set(key, { lights, levels });
+    ctx.scene.add(lights.group);
+  };
   let bgTop: number = palette.backdropTop;
   let bgBottom: number = palette.backdropBottom;
   let keySource: KeySource = 'sun';
@@ -45,9 +54,7 @@ export function createDayCycle(): System {
 
     init(ctx: WorldContext) {
       sky = findSkyLight(ctx.scene);
-      lights = buildCityLights(ctx.specs, ctx.slice, ctx.seed);
-      levels = new Float32Array(lights.count);
-      ctx.scene.add(lights.group);
+      if (ctx.specs.length) addSet('slice', buildCityLights(ctx.specs, ctx.slice, ctx.seed), ctx);
       if (!ctx.shot) ui = new TimeControl(ctx.overlay, ctx.clock, () => ctx.invalidate());
     },
 
@@ -84,11 +91,13 @@ export function createDayCycle(): System {
       ctx.setBackdrop(bgTop, bgBottom);
 
       // 3. City lights, staggered by per-light thresholds; fade unless frozen.
-      if (lights) {
-        const immediate = ctx.shot || dt <= 0;
-        const stepAmt = immediate ? 1 : dt / FADE_SEC;
-        let lit = 0;
-        fading = false;
+      lastAlt = alt;
+      const immediate = ctx.shot || dt <= 0;
+      const stepAmt = immediate ? 1 : dt / FADE_SEC;
+      let lit = 0;
+      let total = 0;
+      fading = false;
+      for (const { lights, levels } of sets.values()) {
         for (let i = 0; i < levels.length; i++) {
           const target = alt < lights.thresholds[i] ? 1 : 0;
           lit += target;
@@ -98,12 +107,13 @@ export function createDayCycle(): System {
             if (levels[i] !== target) fading = true;
           }
         }
+        total += levels.length;
         lights.apply(levels);
-        const fraction = levels.length ? lit / levels.length : 0;
-        if (fraction !== lastFraction) {
-          lastFraction = fraction;
-          ctx.events.emit('lampsOn', { fraction });
-        }
+      }
+      const fraction = total ? lit / total : 0;
+      if (fraction !== lastFraction) {
+        lastFraction = fraction;
+        ctx.events.emit('lampsOn', { fraction });
       }
 
       running = ctx.clock.running;
@@ -112,6 +122,18 @@ export function createDayCycle(): System {
 
     animating() {
       return fading || running;
+    },
+
+    onChunk(id, type, chunk, ctx) {
+      if (type === 'load') {
+        addSet(id, buildCityLights(chunk.specs, chunk.data, ctx.seed), ctx);
+      } else {
+        const set = sets.get(id);
+        if (!set) return;
+        sets.delete(id);
+        ctx.scene.remove(set.lights.group);
+        set.lights.group.traverse((o) => (o as { geometry?: { dispose(): void } }).geometry?.dispose());
+      }
     },
 
     dispose() {
