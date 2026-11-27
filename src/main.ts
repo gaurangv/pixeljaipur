@@ -14,6 +14,7 @@ import { PixelPass } from './render/pixelPass';
 import { addLighting } from './sky/light';
 import { InfoCard } from './ui/infoCard';
 import { Pins } from './ui/pins';
+import { Search, type SearchEntry } from './ui/search';
 import type { Place } from './ui/places';
 import { applyTheme } from './ui/theme';
 import { hashWriter, parseHash } from './ui/urlState';
@@ -482,6 +483,13 @@ async function start() {
     if (err !== 'city') console.error('[pixeljaipur] slice failed to load', err);
   }
   window.__pjCity = cityMode ? () => ({ loaded: chunks?.loadedIds.length ?? 0, busy: chunks?.busy ?? false }) : undefined;
+  if (!shotMode) {
+    const entries: SearchEntry[] = [
+      ...places.map((p) => ({ label: p.name, hint: p.nameHi ?? undefined, x: p.anchor[0], y: p.anchor[1], placeId: p.id })),
+      ...((cityMode && cityIndex?.names) || []).map((n) => ({ label: n.name, hint: 'Street', x: n.at[0], y: n.at[1] })),
+    ];
+    new Search(document.body, entries, (e) => (e.placeId ? openPlace(e.placeId) : flyTo(e.x, e.y, 600)));
+  }
   if (initialPlace && placeById.has(initialPlace)) {
     // A shared link: open the card; only centre on the place if the link didn't set a view.
     openPlace(initialPlace, null, fromHash.zoom === undefined && !params.has('x'));

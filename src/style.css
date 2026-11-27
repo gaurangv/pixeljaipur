@@ -189,3 +189,62 @@ body {
     transition: none;
   }
 }
+
+/* ---- Search (Phase 3) ---- */
+.pj-search {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  width: min(300px, calc(100% - 24px));
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  z-index: 5;
+}
+.pj-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pj-outline);
+  background: var(--pj-lime-white);
+  border: 2px solid var(--pj-outline);
+  box-shadow: 3px 3px 0 var(--pj-outline);
+  outline: none;
+}
+.pj-search input:focus {
+  background: var(--pj-lime-white-shade);
+}
+.pj-search ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  background: var(--pj-lime-white);
+  border: 2px solid var(--pj-outline);
+  box-shadow: 3px 3px 0 var(--pj-outline);
+  max-height: 50vh;
+  overflow: auto;
+}
+.pj-search li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--pj-outline);
+  cursor: pointer;
+}
+.pj-search li small {
+  color: var(--pj-terracotta-shade);
+  white-space: nowrap;
+}
+.pj-search li.is-active,
+.pj-search li:hover {
+  background: var(--pj-marigold);
+}
+/* Phones: the time panel sits top-left, so search goes under it. */
+@media (max-width: 600px) {
+  .pj-search {
+    top: 116px;
+    left: 8px;
+  }
+}

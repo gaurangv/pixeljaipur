@@ -138,6 +138,36 @@ export class Crowd {
     }
   }
 
+  private region: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  private regionWalks: number[] = [];
+
+  /** City streaming: people walk only near the view; anyone far outside is moved back in. */
+  setRegion(r: { x0: number; y0: number; x1: number; y1: number } | null): void {
+    this.region = r;
+    if (!r) return;
+    const inside = (x: number, y: number) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
+    this.regionWalks = [];
+    for (let w = 0; w < this.count; w++) {
+      const a = this.start[w];
+      const b = this.start[w + 1] - 1;
+      if (inside((this.xy[2 * a] + this.xy[2 * b]) / 2, (this.xy[2 * a + 1] + this.xy[2 * b + 1]) / 2)) this.regionWalks.push(w);
+    }
+    for (const p of this.walkers) if (!this.near(p)) this.relocate(p);
+  }
+
+  private near(p: Walker, pad = 30): boolean {
+    const r = this.region;
+    return !r || (p.x >= r.x0 - pad && p.x <= r.x1 + pad && p.y >= r.y0 - pad && p.y <= r.y1 + pad);
+  }
+
+  private relocate(p: Walker): void {
+    if (!this.regionWalks.length) return;
+    p.walk = this.regionWalks[Math.floor(this.rng() * this.regionWalks.length)];
+    p.s = this.rng() * this.length[p.walk];
+    p.seg = 0;
+    this.locate(p);
+  }
+
   setHours(h: number): void {
     this.density = crowdDensity(h);
     for (const p of this.walkers) p.active = p.rank < this.density;
@@ -178,6 +208,7 @@ export class Crowd {
         }
       }
       this.locate(p);
+      if (this.region && !this.near(p)) this.relocate(p);
     }
   }
 

@@ -1,6 +1,12 @@
 import { Group } from 'three';
 import landmarks from '../../data/build/slice1.landmarks.json';
 import lanesData from '../../data/build/slice1.lanes.json';
+import { viewGroundRect } from '../world/chunks';
+
+// Whole-city mode (Phase 3): the city lane graph is fetched (it is too big to bundle).
+const cityLanesUrl = Object.values(import.meta.glob('../../data/build/walled/lanes.json', { query: '?url', import: 'default', eager: true }))[0] as
+  | string
+  | undefined;
 import type { System, WorldContext } from '../core/systems';
 import type { HawaMahalPlacement } from '../landmarks/hawaMahal';
 import { Crowd } from './crowd';
@@ -36,18 +42,33 @@ export function createTraffic(): System {
   let lastHour = -1;
   const group = new Group();
   group.name = 'actors';
+  let city = false;
+  let lastRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Keep traffic and people around the view (city mode). */
+  const followView = (ctx: WorldContext, force = false) => {
+    const r = viewGroundRect(ctx.screenView(), 60);
+    if (!force && lastRect && Math.abs(r.x0 - lastRect.x0) + Math.abs(r.y0 - lastRect.y0) + Math.abs(r.x1 - lastRect.x1) < 20) return;
+    lastRect = r;
+    sim?.setRegion(r);
+    crowd?.setRegion(r);
+  };
 
   return {
     id: 'traffic',
-    init(ctx: WorldContext) {
+    async init(ctx: WorldContext) {
       shot = ctx.shot;
       const hours = ctx.clock.now().hoursIST;
-      const data = lanesData as unknown as LanesJson;
+      city = !!cityLanesUrl && ctx.params.get('slice') !== 'slice1';
+      const data = (city ? await fetch(cityLanesUrl!).then((r) => r.json()) : lanesData) as unknown as LanesJson;
       const graph = new LaneGraph(data);
-      sim = new TrafficSim(graph, { seed: ctx.seed, hours });
+      sim = new TrafficSim(graph, { seed: ctx.seed, hours, scatter: !city });
       crowd = new Crowd(data.walks, { seed: ctx.seed, hours, looks: OUTFITS.length, busy: data.busy });
       const hawa = landmarks.landmarks.find((l) => l.id === 'hawaMahal') as unknown as HawaMahalPlacement | undefined;
       flock = hawa ? new Flock(hawa, { seed: ctx.seed }) : null;
+      if (city) {
+        followView(ctx, true);
+        sim.scatter();
+      }
       meshes = new ActorMeshes(sim, crowd, flock);
       meshes.setLights(headlightsAt(ctx.clock.now().date));
       for (const m of meshes.meshes) group.add(m);
@@ -77,6 +98,7 @@ export function createTraffic(): System {
         meshes.setLights(headlightsAt(now.date));
         lastHour = h;
       }
+      if (city) followView(ctx);
       sim.step(dt, (x, y, kind) => ctx.events.emit('horn', { x, y, kind }));
       crowd.step(dt);
       flock?.step(dt);
